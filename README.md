@@ -12,15 +12,22 @@
 
 ```mermaid
 flowchart TD
-    A([START]) --> B[쿼리 인입];
-    B --> C[쿼리 구조화];
-    C --> D[검색];
-    D --> E[검색된 문서 평가];
-    E --> F{문서 관련성 판단};
-    F -- "적합" --> G[응답 생성];
-    F -- "부적합" --> H[웹 검색];
+    A([START]) --> B[쿼리 인입
+    Query Input];
+    B --> C[쿼리 구조화
+    Query Rewrite];
+    C --> D[검색
+    Retrieve];
+    D --> F{문서 적합도 평가
+    Relevance Grading};
+    F -. "적합
+    Relevant" .-> G[응답 생성
+    Generation];
+    F -. "부적합
+    Irrelevant" .-> H[웹 검색
+    Web Search];
     H --> G;
-    G --> I([종료]);
+    G --> I([END]);
 ```
 
 ### 1. 쿼리 인입(Natural Language Query Input)
