@@ -12,6 +12,7 @@ import copy
 
 from .query_rewrite import rewrite_query
 from .embeddings import get_query_embedding
+from .relevance import grade_relevance
 
 load_dotenv()
 
@@ -109,7 +110,7 @@ def build_elasticsearch_query(
                 if poi_location:
                     es_query["knn"]["filter"].append({
                         "geo_distance": {
-                            "distance": "1km",
+                            "distance": "30km",
                             "pin.location": {
                                 "lat": poi_location["lat"],
                                 "lon": poi_location["lon"]
@@ -142,44 +143,42 @@ def build_elasticsearch_query(
                                 }
                             }
                         },
-                    }
+                    },
                 },
                 {
                     "match": {
                         "review_food": {
                             "query": cuisine,
                             "operator": "and",
-                        }
-                    }
+                        },
+                    },
                 }
             ])
     
     if "menu" in structured_query:
         for menu in structured_query["menu"]:
             food_should.extend([
-                food_should.extend([
-                    {
-                        "nested": {
-                            "path": "menus",
-                            "query": {
-                                "match": {
-                                    "menus.name": {
-                                        "query": menu,
-                                        "operator": "and",
-                                    }
-                                }
-                            }
-                        }
+                {
+                    "nested": {
+                        "path": "menus",
+                        "query": {
+                            "match": {
+                                "menus.name": {
+                                    "query": menu,
+                                    "operator": "and",
+                                },
+                            },
+                        },
                     },
-                    {
-                        "match": {
-                            "review_food": {
-                                "query": menu,
-                                "operator": "and",
-                            }
-                        }
-                    }
-                ])
+                },
+                {
+                    "match": {
+                        "review_food": {
+                            "query": menu,
+                            "operator": "and",
+                        },
+                    },
+                },
             ])
     
     if food_should:
@@ -215,9 +214,9 @@ def search_restaurants(query: str, index_name: str = "restaurants") -> list[dict
     
     # 3. Elasticsearch 쿼리 생성
     es_query = build_elasticsearch_query(structured_query, query_embedding)
-    display_es_query = copy.deepcopy(es_query)
-    display_es_query["knn"].pop("query_vector")
-    print(f"Elasticsearch 쿼리: {json.dumps(display_es_query, indent=2, ensure_ascii=False)}")
+    # display_es_query = copy.deepcopy(es_query)
+    # display_es_query["knn"].pop("query_vector")
+    # print(f"Elasticsearch 쿼리: {json.dumps(display_es_query, indent=2, ensure_ascii=False)}")
     
     # 4. 검색 실행
     es = create_elasticsearch_client()
@@ -231,6 +230,35 @@ def search_restaurants(query: str, index_name: str = "restaurants") -> list[dict
             results.append(doc)
         
         print(f"검색 완료: {len(results)}개 문서 발견")
+
+        # 5. 연관도 판단 및 문서 필터링
+        if results:
+            relevance_result = grade_relevance(query, results)
+            print(f"연관도 평가: {relevance_result['overall_relevance']}")
+            print(f"평가 근거: {relevance_result['reason']}")
+            
+            # relevant 문서만 필터링
+            if relevance_result['overall_relevance'] == 'relevant':
+                filtered_results = []
+                document_scores = relevance_result.get('document_scores', [])
+                
+                for i, doc in enumerate(results):
+                    # document_scores에서 해당 문서의 relevance 확인
+                    doc_relevance = 'relevant'  # 기본값
+                    for score in document_scores:
+                        if str(score.get('document_id')) == str(i + 1):
+                            doc_relevance = score.get('relevance', 'relevant')
+                            break
+                    
+                    if doc_relevance == 'relevant':
+                        filtered_results.append(doc)
+                
+                print(f"필터링 후: {len(filtered_results)}개 문서")
+                return filtered_results
+            else:
+                print("전체적으로 관련성이 낮은 것으로 판단되어 빈 결과를 반환합니다.")
+                return []
+
         return results
         
     except Exception as e:
