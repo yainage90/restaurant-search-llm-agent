@@ -10,4 +10,7 @@ dependencies = [
     "selenium>=4.34.2",
     "beautifulsoup4>=4.12.3",
     "webdriver-manager>=4.0.1",
+    "google-genai>=1.28.0",
+    "numpy>=2.3.2",
+    "elasticsearch>=9.1.0",
 ]
