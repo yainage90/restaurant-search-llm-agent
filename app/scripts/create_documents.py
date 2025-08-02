@@ -23,21 +23,24 @@ SYSTEM_PROMPT = """
 EXTRACT_FEATURES_PROMPT = """
 식당 소개글과 사용자 리뷰를 바탕으로, 아래 각 항목에 해당하는 특징 키워드를 추출해주세요.
 
+**중요: 반드시 유효한 JSON 형식으로만 응답하세요. 추가적인 설명이나 마크다운은 포함하지 마세요.**
+
 **추출 가이드라인:**
-- 각 항목에 대해 10개 이하의 핵심 키워드를 추출합니다.
+- 각 항목에 대해 10개 이하의 핵심 키워드를 추출합니다. 절대로 10개보다 많이 생성하지 마세요.
 - 키워드는 명사 형태로 간결하게 표현해주세요. (예: "주차 가능" -> "주차")
 - 직접적으로 등장하는 표현이 아니면 추출하지마세요.
 - 여러 리뷰에서 공통적으로 언급되는 내용을 우선적으로 고려합니다.
+- 절대로 같은 키워드를 중복해서 생성하지세요.
 - 모든 키워드를 종합하여 중복을 제거해주세요.
-- 최종 결과는 반드시 JSON 형식으로 반환해야 합니다.
+- 해당 항목에 대한 키워드가 없다면 빈 배열 []을 반환하세요.
 
-**추출 항목:**
+**JSON 형식:**
 {{
-    "review_food": "리뷰에서 언급된 메뉴나 음식 키워드 (예: 파스타, 스테이크, 떡볶이)",
-    "convenience": "편의 시설 및 서비스 (예: 주차, 발렛, 배달, 포장, 예약, 룸, 콜키지, 반려동물, 와이파이)",
-    "atmosphere": "식당의 전반적인 분위기 (예: 이국적인, 로맨틱한, 뷰맛집, 노포, 조용한, 시끌벅적한)",
-    "occasion": "어떤 상황에 어울리는지 (예: 데이트, 기념일, 회식, 단체, 가족, 혼밥, 모임)",
-    "features": "기타 특징 (예: 유명인 방문 - 유명인 이름, 넓은공간, 가성비, 친절한, 웨이팅)"
+    "review_food": ["리뷰에서 언급된 메뉴나 음식 키워드 (예: 파스타, 스테이크, 떡볶이)"],
+    "convenience": ["편의 시설 및 서비스 (예: 주차, 발렛, 배달, 포장, 예약, 룸, 콜키지, 반려동물, 와이파이)"],
+    "atmosphere": ["식당의 전반적인 분위기 (예: 이국적인, 로맨틱한, 뷰맛집, 노포, 조용한, 시끌벅적한)"],
+    "occasion": ["어떤 상황에 어울리는지 (예: 데이트, 기념일, 회식, 단체, 가족, 혼밥, 모임)"],
+    "features": ["기타 특징 (예: 유명인 방문 - 유명인 이름, 넓은공간, 가성비, 친절한, 웨이팅)"]
 }}
 
 ---
@@ -114,7 +117,7 @@ def convert_coordinates(mapx: str, mapy: str) -> tuple[float, float]:
     return lat, lon
 
 
-def extract_features_with_llm(reviews: list[str], description: str) -> dict[str, list[str]]:
+def extract_features_with_llm(place_id: str, reviews: list[str], description: str) -> dict[str, list[str]]:
     """
     LLM을 사용하여 리뷰와 설명에서 특징을 추출
     실제 구현시에는 OpenAI API 등을 사용
@@ -131,28 +134,28 @@ def extract_features_with_llm(reviews: list[str], description: str) -> dict[str,
     response = llm.models.generate_content(
         model="gemini-2.5-flash-lite",
         contents=user_prompt,
-        config={
-            "system_instruction": SYSTEM_PROMPT,
-            "response_mime_type": "application/json",
-            "response_schema": LLMFeatures,
-            "temperature": 0.0,
-        }
-        # config=genai.types.GenerateContentConfig(
-        #     temperature=0.0,
-        #     system_instruction=SYSTEM_PROMPT,
-        #     response_mime_type="application/json",
-        #     response_schema=LLMFeatures,
-        # )
+        config=genai.types.GenerateContentConfig(
+            temperature=0.0,
+            system_instruction=SYSTEM_PROMPT,
+            response_mime_type="application/json",
+            response_schema=LLMFeatures,
+            max_output_tokens=1024,
+        )
     )
 
     response_text = response.text
+        
     # LLM 응답에 포함된 마크다운을 제거
     if "```" in response_text:
         match = re.search(r"\{.*\}", response_text, re.DOTALL)
         if match:
             response_text = match.group(0)
 
-    llm_features = json.loads(response_text)
+    try:
+        llm_features = json.loads(response_text)
+    except:
+        print(f"JSONDecodeError: {place_id}")
+        return None
 
     return llm_features
     
@@ -214,9 +217,13 @@ def process_restaurant(raw_data: dict[str, Any]) -> dict[str, Any]:
     
     # 2. LLM을 사용한 특징 추출
     extracted_features = extract_features_with_llm(
+        raw_data["place_id"],
         raw_data.get("reviews", []),
         raw_data.get("description", "")
     )
+
+    if not extracted_features:
+        return None
     
     # 3. 요약 생성
     summary = create_summary(
@@ -291,25 +298,45 @@ def print_test():
 
 def main():
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    INPUT_FILE = os.path.join(BASE_DIR, "../../data/crawled_restaurants.jsonl")
-    OUPUT_FILE = os.path.join(BASE_DIR, "../../data/documents.jsonl")
+    INPUT_DIR = os.path.join(BASE_DIR, "../../data/crawled_restaurants")
+    OUTPUT_DIR = os.path.join(BASE_DIR, "../../data/documents")
+    
+    # 출력 디렉토리 생성
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    
+    # 입력 디렉토리에서 모든 part 파일 찾기
+    input_files = [f for f in os.listdir(INPUT_DIR) if f.startswith("part-") and f.endswith(".jsonl")]
+    input_files.sort()  # 파일명 순서로 정렬
+    
+    for input_filename in input_files:
+        input_file_path = os.path.join(INPUT_DIR, input_filename)
+        output_file_path = os.path.join(OUTPUT_DIR, input_filename)
+        
+        print(f"Processing {input_filename}...")
+        
+        # 이미 처리된 place_id들 확인
+        processed_place_ids = set()
+        if os.path.exists(output_file_path):
+            with open(output_file_path, "r", encoding="utf-8") as f_out:
+                for line in f_out:
+                    document = json.loads(line)
+                    processed_place_ids.add(document["place_id"])
+        
+        # 파일 처리
+        with open(output_file_path, "a", encoding="utf-8") as f_out:
+            with open(input_file_path, "r", encoding="utf-8") as f_in:
+                for line in f_in:
+                    raw_data = json.loads(line)
+                    if raw_data["place_id"] in processed_place_ids:
+                        continue
 
-    processed_place_ids = set()
-    if os.path.exists(OUPUT_FILE):
-        with open(OUPUT_FILE, "r", encoding="utf-8") as f_out:
-            for line in f_out:
-                document = json.loads(line)
-                processed_place_ids.add(document["place_id"])
+                    document = process_restaurant(raw_data)
+                    if not document:
+                        continue
 
-    with open(OUPUT_FILE, "a", encoding="utf-8") as f_out:
-        with open(INPUT_FILE, "r", encoding="utf-8") as f_in:
-            for line in f_in:
-                raw_data = json.loads(line)
-                if raw_data["place_id"] in processed_place_ids:
-                    continue
-
-                document = process_restaurant(raw_data)
-                f_out.write(f"{json.dumps(document, ensure_ascii=False)}\n")
+                    f_out.write(f"{json.dumps(document, ensure_ascii=False)}\n")
+        
+        print(f"Completed {input_filename}")
 
 
 if __name__ == "__main__":

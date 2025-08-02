@@ -2,7 +2,7 @@
 import json
 import re
 import logging
-from typing import List, Dict, Optional, Any
+# typing 라이브러리는 사용하지 않음 (Python 3.13)
 from dataclasses import dataclass
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -25,15 +25,15 @@ class CrawlerConfig:
     tab_container_selector: str = ".Jxtsc"
     menu_more_button_selector: str = ".fvwqf"
     # Multiple menu item selectors for different layouts
-    menu_item_selectors: List[str] = None
-    menu_name_selectors: List[str] = None
-    menu_price_selectors: List[str] = None
+    menu_item_selectors: list[str] = None
+    menu_name_selectors: list[str] = None
+    menu_price_selectors: list[str] = None
     # Sub-tab selectors (for menu category tabs etc.)
     review_more_button_selector: str = "a.fvwqf"
     review_container_selector: str = "ul#_review_list"
     review_item_selector: str = "div.pui__vn15t2 > a"
     # Restaurant info selectors
-    info_description_selectors: List[str] = None
+    info_description_selectors: list[str] = None
     
     def __post_init__(self):
         # Define multiple selector patterns for different menu layouts
@@ -68,11 +68,8 @@ class CrawlerConfig:
 config = CrawlerConfig()
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INPUT_FILE = os.path.join(BASE_DIR, "../data/restaurants.jsonl")
-OUTPUT_FILE = os.path.join(BASE_DIR, "../data/crawled_restaurants.jsonl")
-
-log_dir = f'{BASE_DIR}/logs'
-if not os.path.exists(log_dir):
-    os.makedirs(log_dir)
+OUTPUT_DIR = os.path.join(BASE_DIR, "../data/crawled_restaurants")
+MAX_RECORDS_PER_FILE = 1000
 
 # 로깅 설정
 logging.basicConfig(
@@ -218,7 +215,7 @@ def validate_menu_item(name: str, price: str) -> bool:
     
     return True
 
-def try_menu_selectors(driver: webdriver.Chrome, wait: WebDriverWait) -> Optional[tuple]:
+def try_menu_selectors(driver: webdriver.Chrome, wait: WebDriverWait) -> tuple | None:
     """다양한 CSS 셀렉터를 시도하여 메뉴 항목을 찾습니다."""
     for item_selector in config.menu_item_selectors:
         try:
@@ -241,7 +238,7 @@ def try_menu_selectors(driver: webdriver.Chrome, wait: WebDriverWait) -> Optiona
             continue
     return None
 
-def try_price_based_extraction(driver: webdriver.Chrome) -> List[Dict[str, str]]:
+def try_price_based_extraction(driver: webdriver.Chrome) -> list[dict[str, str]]:
     """가격 기반으로 메뉴 항목을 추출합니다. (스타벅스 등 특수 구조용)"""
     import re
     
@@ -395,7 +392,7 @@ def scroll_until_no_new_content(driver: webdriver.Chrome, wait: WebDriverWait, i
     logger.info(f"{scroll_count}번 스크롤 후 종료.")
     return scroll_count
 
-def get_menu_data(driver: webdriver.Chrome, wait: WebDriverWait) -> Optional[List[Dict[str, str]]]:
+def get_menu_data(driver: webdriver.Chrome, wait: WebDriverWait) -> list[dict[str, str]] | None:
     """메뉴 탭의 모든 메뉴명과 가격을 수집합니다."""
     if not click_tab(driver, wait, "메뉴"):
         return None
@@ -466,7 +463,7 @@ def validate_review_text(text: str) -> bool:
     """리뷰 텍스트의 유효성을 검증합니다."""
     return bool(text and text.strip() and len(text.strip()) > 5)
 
-def get_info_description(driver: webdriver.Chrome, wait: WebDriverWait) -> Optional[str]:
+def get_info_description(driver: webdriver.Chrome, wait: WebDriverWait) -> str | None:
     """정보 탭의 업체 소개를 수집합니다."""
     # 다양한 정보 탭 이름 시도
     info_tab_names = ["정보", "Info", "상세정보"]
@@ -505,7 +502,7 @@ def get_info_description(driver: webdriver.Chrome, wait: WebDriverWait) -> Optio
     return None
 
 
-def get_review_data(driver: webdriver.Chrome, wait: WebDriverWait) -> List[str]:
+def get_review_data(driver: webdriver.Chrome, wait: WebDriverWait) -> list[str]:
     """리뷰 탭의 모든 텍스트 리뷰를 수집합니다."""
     # 다양한 리뷰 탭 이름 시도
     review_tab_names = ["리뷰", "후기", "Review"]
@@ -558,37 +555,41 @@ def get_review_data(driver: webdriver.Chrome, wait: WebDriverWait) -> List[str]:
     return reviews
 
 
-def load_existing_crawled_data(output_file: str) -> tuple[set, dict]:
+def load_existing_crawled_data(output_dir: str) -> tuple[set, dict]:
     """기존에 크롤링된 업체 ID와 검색 키워드 매핑을 로드합니다."""
     crawled_place_ids = set()
     search_keyword_to_place_id = {}
     
-    if os.path.exists(output_file):
-        with open(output_file, 'r', encoding='utf-8') as f_existing:
-            for line in f_existing:
-                try:
-                    data = json.loads(line)
-                    if 'place_id' in data:
-                        place_id = data['place_id']
-                        crawled_place_ids.add(place_id)
-                        
-                        # 검색 키워드가 있으면 매핑에 추가
-                        if 'search_keyword' in data:
-                            search_keyword_to_place_id[data['search_keyword']] = place_id
-                except json.JSONDecodeError:
-                    continue
+    if os.path.exists(output_dir):
+        # 모든 part 파일을 읽어들임
+        for filename in os.listdir(output_dir):
+            if filename.startswith('part-') and filename.endswith('.jsonl'):
+                filepath = os.path.join(output_dir, filename)
+                with open(filepath, 'r', encoding='utf-8') as f_existing:
+                    for line in f_existing:
+                        try:
+                            data = json.loads(line)
+                            if 'place_id' in data:
+                                place_id = data['place_id']
+                                crawled_place_ids.add(place_id)
+                                
+                                # 검색 키워드가 있으면 매핑에 추가
+                                if 'search_keyword' in data:
+                                    search_keyword_to_place_id[data['search_keyword']] = place_id
+                        except json.JSONDecodeError:
+                            continue
     
     logger.info(f"기존에 크롤링된 업체 ID {len(crawled_place_ids)}개를 로드했습니다.")
     logger.info(f"검색 키워드 매핑 {len(search_keyword_to_place_id)}개를 로드했습니다.")
     return crawled_place_ids, search_keyword_to_place_id
 
-def extract_place_id_from_url(url: str) -> Optional[str]:
+def extract_place_id_from_url(url: str) -> str | None:
     """
 URL에서 업체 ID를 추출합니다."""
     match = re.search(r"/place/(\d+)", url)
     return match.group(1) if match else None
 
-def process_restaurant(driver: webdriver.Chrome, wait: WebDriverWait, restaurant_info: Dict[str, Any], crawled_place_ids: set, search_keyword_to_place_id: dict) -> Optional[Dict[str, Any]]:
+def process_restaurant(driver: webdriver.Chrome, wait: WebDriverWait, restaurant_info: dict[str, any], crawled_place_ids: set, search_keyword_to_place_id: dict) -> dict[str, any] | None:
     """개별 레스토랑 정보를 처리합니다."""
     title = restaurant_info.get("title", "")
     title = title.replace("&amp;", " ")
@@ -669,21 +670,52 @@ def process_restaurant(driver: webdriver.Chrome, wait: WebDriverWait, restaurant
         logger.info("=" * 80)
         return None
 
+def get_current_part_file_path(output_dir: str) -> str:
+    """현재 사용할 part 파일 경로를 반환합니다."""
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    
+    # 기존 part 파일들 중 가장 높은 번호 찾기
+    max_part_num = -1
+    current_file_record_count = 0
+    
+    for filename in os.listdir(output_dir):
+        if filename.startswith('part-') and filename.endswith('.jsonl'):
+            try:
+                part_num = int(filename.split('-')[1].split('.')[0])
+                max_part_num = max(max_part_num, part_num)
+            except (ValueError, IndexError):
+                continue
+    
+    # 현재 파일의 레코드 수 확인
+    if max_part_num >= 0:
+        current_file_path = os.path.join(output_dir, f"part-{max_part_num:05d}.jsonl")
+        if os.path.exists(current_file_path):
+            with open(current_file_path, 'r', encoding='utf-8') as f:
+                current_file_record_count = sum(1 for line in f if line.strip())
+    
+    # 새 파일이 필요한지 확인
+    if max_part_num < 0 or current_file_record_count >= MAX_RECORDS_PER_FILE:
+        max_part_num += 1
+    
+    return os.path.join(output_dir, f"part-{max_part_num:05d}.jsonl")
+
 def main():
     """메인 크롤링 로직을 실행합니다."""
     logger.info("크롤링 시작")
     
     driver = get_driver()
     wait = WebDriverWait(driver, config.default_wait_time)
-    crawled_place_ids, search_keyword_to_place_id = load_existing_crawled_data(OUTPUT_FILE)
+    crawled_place_ids, search_keyword_to_place_id = load_existing_crawled_data(OUTPUT_DIR)
 
     processed_count = 0
     success_count = 0
+    current_file_record_count = 0
+    current_output_file = None
+    current_file_handle = None
     
     try:
-        with open(INPUT_FILE, 'r', encoding='utf-8') as f_in, \
-             open(OUTPUT_FILE, 'a', encoding='utf-8') as f_out:
-            
+        with open(INPUT_FILE, 'r', encoding='utf-8') as f_in:
             for line in f_in:
                 try:
                     restaurant_info = json.loads(line.strip())
@@ -692,8 +724,28 @@ def main():
                     crawled_data = process_restaurant(driver, wait, restaurant_info, crawled_place_ids, search_keyword_to_place_id)
                     
                     if crawled_data:
-                        f_out.write(json.dumps(crawled_data, ensure_ascii=False) + '\n')
-                        f_out.flush()  # 즉시 파일에 쓰기
+                        # 새 파일이 필요한지 확인
+                        if current_file_handle is None or current_file_record_count >= MAX_RECORDS_PER_FILE:
+                            if current_file_handle:
+                                current_file_handle.close()
+                            
+                            current_output_file = get_current_part_file_path(OUTPUT_DIR)
+                            current_file_handle = open(current_output_file, 'a', encoding='utf-8')
+                            
+                            # 기존 파일의 레코드 수 확인
+                            if os.path.exists(current_output_file):
+                                with open(current_output_file, 'r', encoding='utf-8') as temp_f:
+                                    current_file_record_count = sum(1 for temp_line in temp_f if temp_line.strip())
+                            else:
+                                current_file_record_count = 0
+                            
+                            logger.info(f"새 출력 파일 사용: {current_output_file} (현재 레코드 수: {current_file_record_count})")
+                        
+                        # 데이터 쓰기
+                        current_file_handle.write(json.dumps(crawled_data, ensure_ascii=False) + '\n')
+                        current_file_handle.flush()  # 즉시 파일에 쓰기
+                        current_file_record_count += 1
+                        
                         # 성공한 크롤링 데이터를 메모리에도 업데이트
                         place_id = crawled_data['place_id']
                         search_keyword = crawled_data['search_keyword']
@@ -709,6 +761,8 @@ def main():
                     continue
 
     finally:
+        if current_file_handle:
+            current_file_handle.close()
         driver.quit()
         logger.info(f"크롤링 완료: 총 {processed_count}개 처리, {success_count}개 성공")
 
