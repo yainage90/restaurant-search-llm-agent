@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 import os
 import json
+import glob
 from elasticsearch import Elasticsearch
 from elasticsearch.helpers import bulk
 from typing import Any
@@ -148,10 +149,10 @@ def bulk_index_documents(es: Elasticsearch, index_name: str, documents: list[dic
 
 
 def load_and_index_from_json(
-    json_file_path: str, 
+    documents_dir: str, 
     index_name: str = "restaurants",
 ) -> None:
-    """JSON 파일에서 데이터를 읽어 Elasticsearch에 색인"""
+    """documents 디렉토리의 part-*.jsonl 파일들에서 데이터를 읽어 Elasticsearch에 색인"""
     
     # Elasticsearch 클라이언트 생성
     es = create_elasticsearch_client()
@@ -159,16 +160,33 @@ def load_and_index_from_json(
     # 인덱스 생성
     create_index_mapping(es, index_name)
     
-    # JSON 파일 읽기
-    with open(json_file_path, 'r', encoding='utf-8') as f:
-        documents = []
-        for line in f:
-            documents.append(json.loads(line))
+    # part-*.jsonl 파일들 찾기
+    pattern = os.path.join(documents_dir, "part-*.jsonl")
+    jsonl_files = glob.glob(pattern)
     
-    print(f"총 {len(documents)}개 문서를 색인합니다...")
+    if not jsonl_files:
+        print(f"디렉토리 '{documents_dir}'에서 part-*.jsonl 파일을 찾을 수 없습니다.")
+        return
+    
+    jsonl_files.sort()  # 파일 순서 정렬
+    print(f"발견된 파일들: {jsonl_files}")
+    
+    all_documents = []
+    
+    # 모든 JSONL 파일 읽기
+    for file_path in jsonl_files:
+        print(f"파일 읽는 중: {file_path}")
+        with open(file_path, 'r', encoding='utf-8') as f:
+            file_documents = []
+            for line in f:
+                file_documents.append(json.loads(line))
+            all_documents.extend(file_documents)
+            print(f"  - {len(file_documents)}개 문서 로드됨")
+    
+    print(f"총 {len(all_documents)}개 문서를 색인합니다...")
     
     # 배치로 문서 색인
-    bulk_index_documents(es, index_name, documents)
+    bulk_index_documents(es, index_name, all_documents)
     
     print(f"모든 문서 색인 완료!")
     
@@ -183,5 +201,5 @@ def load_and_index_from_json(
 if __name__ == "__main__":
     # 사용 예시
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    json_file_path = f"{BASE_DIR}/../../data/documents.jsonl" 
-    load_and_index_from_json(json_file_path)
+    documents_dir = f"{BASE_DIR}/../../data/documents" 
+    load_and_index_from_json(documents_dir)
