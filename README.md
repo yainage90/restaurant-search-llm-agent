@@ -60,7 +60,7 @@ flowchart TD
     - `occasion`: 상황(예: 회식, 단체, 데이트, 혼밥, 가족)
 
 
-예시 1) query: "강남역 주차되는 일식집"
+> 예시 1) query: "강남역 주차되는 일식집"
 ```json
 {
     "location": [{"name": "강남역", "relation": "nearby"}],
