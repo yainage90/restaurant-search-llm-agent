@@ -79,7 +79,7 @@ def build_elasticsearch_query(
     es_query = {
         "size": 5,
         "_source": {
-            "excludes": ["embedding"],
+            "includes": ["place_id", "summary"],
         },
         "knn": {
             "field": "embedding",
@@ -253,7 +253,7 @@ def search_restaurants(query: str, index_name: str = "restaurants") -> list[dict
                     if doc_relevance == 'relevant':
                         filtered_results.append(doc)
                 
-                print(f"필터링 후: {len(filtered_results)}개 문서")
+                print(f"필터링 후: {len(filtered_results)}개 문서\n")
                 return filtered_results
             else:
                 print("전체적으로 관련성이 낮은 것으로 판단되어 빈 결과를 반환합니다.")
@@ -279,21 +279,17 @@ def test_search():
     print("=== 식당 검색 테스트 ===")
     for i, query in enumerate(test_queries, 1):
         print(f"\n{i}. 테스트 쿼리: '{query}'")
-        print("-" * 50)
+        print("=" * 50)
         
         results = search_restaurants(query)
-        
+
         if results:
             for j, result in enumerate(results, 1):
-                print(f"  {j}. 음식점: {result['title']}")
-                print(f"     주소: {result.get('address', 'N/A')}")
-                print(f"     편의: {result['convenience']}")
-                print(f"     분위기: {result['atmosphere']}")
-                print(f"     상황: {result['occasion']}")
-                print(f"     리뷰음식 {result['review_food']}")
-                print(f"     기타특징: {result['features']}")
-                print(f"     메뉴: {result['menus']}")
-                print(f"     점수: {result.get('_score', 'N/A'):.4f}")
+                print(f"업체 {j}:\n")
+                print(f"업체 ID: {result['place_id']}\n")
+                print(f"업체 요약:\n{result['summary']}")
+                print(f"점수: {result.get('_score')}")
+                print('-' * 80)
         else:
             print("  검색 결과 없음")
         
