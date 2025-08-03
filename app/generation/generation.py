@@ -39,22 +39,61 @@ def generate(query: str, context: str) -> str:
     """
 
     # 프롬프트 생성
-    user_prompt = GENERATION_PROMPT.format(query=query, context=context)
-    
-    # LLM에 요청
-    response = client.models.generate_content(
-        model="gemini-2.5-flash-lite",
-        contents=user_prompt,
-        config=genai.types.GenerateContentConfig(
-            temperature=0.0,
-            system_instruction=SYSTEM_PROMPT,
-            max_output_tokens=1024,
+    if query:
+        user_prompt = GENERATION_PROMPT.format(query=query, context=context)
+        
+        # LLM에 요청
+        response = client.models.generate_content(
+            model="gemini-2.5-flash-lite",
+            contents=user_prompt,
+            config=genai.types.GenerateContentConfig(
+                temperature=0.0,
+                system_instruction=SYSTEM_PROMPT,
+                max_output_tokens=1024,
+            )
         )
-    )
+    else:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash-lite",
+            contents=context,
+            config=genai.types.GenerateContentConfig(
+                temperature=0.0,
+                system_instruction=SYSTEM_PROMPT,
+                max_output_tokens=1024,
+            )
+                
+        )
 
     generated_text = response.text
 
+
     return generated_text
+
+
+def generate_streaming(chat_history: str):
+    """
+    사용자 쿼리와 검색된 컨텍스트를 받아서 LLM에 스트리밍 응답 생성을 요청합니다.
+    
+    Args:
+        context: 검색된 식당 정보 문서들 (빈 문자열이면 일반 대화)
+        
+    Yields:
+        str: 스트리밍되는 응답 청크
+    """
+    
+    # LLM에 스트리밍 요청
+    response = client.models.generate_content_stream(
+        model="gemini-2.5-flash-lite",
+        contents=chat_history,
+        config=genai.types.GenerateContentConfig(
+            temperature=0.0,
+            max_output_tokens=1024,
+        ),
+    )
+
+    for chunk in response:
+        if chunk.text:
+            yield chunk.text
         
 
 def test_generation():
