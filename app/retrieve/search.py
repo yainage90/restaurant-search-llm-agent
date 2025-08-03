@@ -110,7 +110,7 @@ def build_elasticsearch_query(
                 if poi_location:
                     es_query["knn"]["filter"].append({
                         "geo_distance": {
-                            "distance": "30km",
+                            "distance": "3km",
                             "pin.location": {
                                 "lat": poi_location["lat"],
                                 "lon": poi_location["lon"]
@@ -188,7 +188,7 @@ def build_elasticsearch_query(
                 "minimum_should_match": 1
             }
         })
-    
+
     return es_query
 
 
