@@ -2,7 +2,6 @@
 자연어 쿼리를 받아서 쿼리 재구조화, 임베딩 계산, 검색을 수행하는 메인 모듈
 """
 
-import json
 import os
 import requests
 from typing import Any
@@ -13,9 +12,12 @@ import copy
 from .query_rewrite import rewrite_query
 from .embeddings import get_query_embedding
 from .relevance import grade_relevance
+from tavily import TavilyClient
+
 
 load_dotenv()
 
+travily_client = TavilyClient()
 
 def create_elasticsearch_client() -> Elasticsearch:
     """Elasticsearch 클라이언트 생성"""
@@ -266,14 +268,48 @@ def search_restaurants(query: str, index_name: str = "restaurants") -> list[dict
         return []
 
 
-def test_search():
+def search_web(query: str):
+    response = travily_client.search(
+        query=query,
+        max_results=3,
+        search_depth='basic',
+    )
+
+    docs = [
+        {
+            "title": result["title"],
+            "content": result["content"],
+        } for result in response["results"]
+    ]
+
+    return docs 
+
+
+def search(query):
+    context = ""
+    docs = search_restaurants(query)
+    if docs:
+        for i, doc in enumerate(docs):
+            context += f"""
+문서 {i + 1}:
+{doc["summary"]}\n
+"""
+    else:
+        docs = search_web(query)
+        for i, doc in enumerate(docs):
+            context += f"""
+문서 {i + 1}:
+문서 제목: {doc["title"]}
+문서 내용: {doc["content"]}\n
+"""
+    return context
+
+
+def test_search_restaurants():
     """검색 기능 테스트"""
     test_queries = [
         "강남역 주차되는 일식집",
-        "판교 애견동반 식당",
         "마포 진대감 주차되나요?",
-        "조용히 대화할 수 있는 맥주집",
-        "송파 회식하기 좋은 삼겹살집 추천해줘"
     ]
     
     print("=== 식당 검색 테스트 ===")
@@ -296,5 +332,30 @@ def test_search():
         print()
 
 
+def test_web_search():
+    queries = [
+        "김두한이 자주가던 국밥집",
+        "무한도전 기사식당",
+    ]
+
+    for query in queries:
+        docs = search_web(query)
+        print(docs)
+        print('-' * 80)
+
+
+def test_search():
+    test_queries = [
+        "강남역 주차되는 일식집",
+        "마포 진대감 주차되나요?",
+    ]
+
+    for query in test_queries:
+        context = search(query)
+        print(context)
+
+
 if __name__ == "__main__":
+    # test_search_restaurants()
+    # test_web_search
     test_search()
