@@ -155,6 +155,7 @@ def main():
                         "mapy": item.get("mapy", ""),
                         "query": query,
                     }
+                    existing_queries.add(query)
                     
                     # Create a unique key and check for duplicates before writing
                     unique_key = f"{restaurant_data['title']}{restaurant_data['mapx']}{restaurant_data['mapy']}"
