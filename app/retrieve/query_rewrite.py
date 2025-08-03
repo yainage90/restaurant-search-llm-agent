@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 load_dotenv()
 
-llm = genai.Client()
+client = genai.Client()
 
 SYSTEM_PROMPT = """
 당신은 식당 검색을 위한 쿼리 재작성 전문가입니다.
@@ -77,13 +77,16 @@ def rewrite_query(query: str) -> dict:
     """LLM을 사용한 쿼리 재작성"""
     user_prompt = USER_QUERY_PROMPT.format(query=query)
     
-    response = llm.models.generate_content(
+    response = client.models.generate_content(
         model="gemini-2.5-flash-lite",
-        contents=[SYSTEM_PROMPT, user_prompt],
-        config={
-            "response_mime_type": "application/json",
-            "response_schema": StructuredQuery
-        }
+        contents=user_prompt,
+        config=genai.types.GenerateContentConfig(
+            temperature=0.0,
+            system_instruction=SYSTEM_PROMPT,
+            response_mime_type="application/json",
+            response_schema=StructuredQuery,
+            max_output_tokens=128,
+        )
     )
     structured_query = response.parsed.model_dump(exclude_none=True)
     structured_query = {k: v for k, v in structured_query.items() if v}
