@@ -69,6 +69,7 @@ config = CrawlerConfig()
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INPUT_FILE = os.path.join(BASE_DIR, "../data/restaurants.jsonl")
 OUTPUT_DIR = os.path.join(BASE_DIR, "../data/crawled_restaurants")
+FAILED_KEYWORDS_FILE = os.path.join(BASE_DIR, "../data/failed_keywords.txt")
 MAX_RECORDS_PER_FILE = 1000
 
 # 로깅 설정
@@ -583,13 +584,34 @@ def load_existing_crawled_data(output_dir: str) -> tuple[set, dict]:
     logger.info(f"검색 키워드 매핑 {len(search_keyword_to_place_id)}개를 로드했습니다.")
     return crawled_place_ids, search_keyword_to_place_id
 
+def load_failed_keywords(failed_keywords_file: str) -> set[str]:
+    """실패한 검색어 목록을 로드합니다."""
+    failed_keywords = set()
+    
+    if os.path.exists(failed_keywords_file):
+        with open(failed_keywords_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                keyword = line.strip()
+                if keyword:
+                    failed_keywords.add(keyword)
+    
+    logger.info(f"실패한 검색어 {len(failed_keywords)}개를 로드했습니다.")
+    return failed_keywords
+
+def save_failed_keyword(failed_keywords_file: str, keyword: str):
+    """실패한 검색어를 파일에 기록합니다."""
+    os.makedirs(os.path.dirname(failed_keywords_file), exist_ok=True)
+    with open(failed_keywords_file, 'a', encoding='utf-8') as f:
+        f.write(keyword + '\n')
+    logger.info(f"실패한 검색어 기록: {keyword}")
+
 def extract_place_id_from_url(url: str) -> str | None:
     """
 URL에서 업체 ID를 추출합니다."""
     match = re.search(r"/place/(\d+)", url)
     return match.group(1) if match else None
 
-def process_restaurant(driver: webdriver.Chrome, wait: WebDriverWait, restaurant_info: dict[str, any], crawled_place_ids: set, search_keyword_to_place_id: dict) -> dict[str, any] | None:
+def process_restaurant(driver: webdriver.Chrome, wait: WebDriverWait, restaurant_info: dict[str, any], crawled_place_ids: set, search_keyword_to_place_id: dict, failed_keywords: set) -> tuple[dict[str, any] | None, bool]:
     """개별 레스토랑 정보를 처리합니다."""
     title = restaurant_info.get("title", "")
     title = title.replace("&amp;", " ")
@@ -597,16 +619,21 @@ def process_restaurant(driver: webdriver.Chrome, wait: WebDriverWait, restaurant
 
     if not title or not road_address:
         logger.warning("제목 또는 주소가 비어있어 건너뜁니다.")
-        return None
+        return None, False
 
     short_address = " ".join(road_address.split()[:3])
     search_keyword = f"{title} {short_address}"
     
-    # 검색 키워드를 통해 이미 크롤링된 업체인지 먼저 확인
+    # 실패한 검색어인지 먼저 확인
+    if search_keyword in failed_keywords:
+        logger.info(f"이미 실패한 검색어입니다: {search_keyword}. 건너뜁니다.")
+        return None, False
+    
+    # 검색 키워드를 통해 이미 크롤링된 업체인지 확인
     if search_keyword in search_keyword_to_place_id:
         existing_place_id = search_keyword_to_place_id[search_keyword]
         logger.info(f"이미 크롤링된 업체입니다 (검색키워드: {search_keyword}, ID: {existing_place_id}). 웹 요청을 건너뜁니다.")
-        return None
+        return None, False
     
     logger.info("=" * 80)
     logger.info(f"{title} ({search_keyword}) 크롤링 시작")
@@ -618,14 +645,14 @@ def process_restaurant(driver: webdriver.Chrome, wait: WebDriverWait, restaurant
         if not switch_to_entry_iframe(driver, WebDriverWait(driver, 5)):
             logger.warning(f"Iframe을 찾지 못해 {title}을(를) 건너뜁니다.")
             logger.info("=" * 80)
-            return None
+            return None, True  # 실패 상황으로 기록
 
         # 업체 ID 추출
         place_id = extract_place_id_from_url(driver.current_url)
         if not place_id:
             logger.warning("URL에서 업체 ID를 찾지 못했습니다.")
             logger.info("=" * 80)
-            return None
+            return None, True  # 실패 상황으로 기록
         
         # 이중 체크: place_id로도 한번 더 확인 (혹시 다른 검색키워드로 같은 업체가 크롤링되었을 경우)
         if place_id in crawled_place_ids:
@@ -633,7 +660,7 @@ def process_restaurant(driver: webdriver.Chrome, wait: WebDriverWait, restaurant
             # 검색 키워드 매핑에 추가하여 다음번에는 웹 요청을 건너뛸 수 있도록 함
             search_keyword_to_place_id[search_keyword] = place_id
             logger.info("=" * 80)
-            return None
+            return None, False  # 성공적으로 건너뛀
 
         # 탭 컨테이너 대기
         try:
@@ -641,7 +668,7 @@ def process_restaurant(driver: webdriver.Chrome, wait: WebDriverWait, restaurant
         except TimeoutException:
             logger.warning("탭 컨테이너를 찾을 수 없어 이 식당을 건너뜁니다.")
             logger.info("=" * 80)
-            return None
+            return None, False # 실패 상황으로 기록
 
         menu_data = get_menu_data(driver, wait)
         review_data = get_review_data(driver, wait)
@@ -663,12 +690,12 @@ def process_restaurant(driver: webdriver.Chrome, wait: WebDriverWait, restaurant
 
         logger.info(f"{title} 크롤링 완료")
         logger.info("=" * 80)
-        return crawled_data
+        return crawled_data, False  # 성공
 
     except Exception as e:
         logger.error(f"'{title}' 크롤링 중 에러 발생: {e}")
         logger.info("=" * 80)
-        return None
+        return None, True  # 실패 상황으로 기록
 
 def get_current_part_file_path(output_dir: str) -> str:
     """현재 사용할 part 파일 경로를 반환합니다."""
@@ -707,6 +734,7 @@ def main():
     driver = get_driver()
     wait = WebDriverWait(driver, config.default_wait_time)
     crawled_place_ids, search_keyword_to_place_id = load_existing_crawled_data(OUTPUT_DIR)
+    failed_keywords = load_failed_keywords(FAILED_KEYWORDS_FILE)
 
     processed_count = 0
     success_count = 0
@@ -721,7 +749,18 @@ def main():
                     restaurant_info = json.loads(line.strip())
                     processed_count += 1
                     
-                    crawled_data = process_restaurant(driver, wait, restaurant_info, crawled_place_ids, search_keyword_to_place_id)
+                    crawled_data, should_record_failure = process_restaurant(driver, wait, restaurant_info, crawled_place_ids, search_keyword_to_place_id, failed_keywords)
+                    
+                    # 실패한 경우 기록
+                    if should_record_failure and crawled_data is None:
+                        title = restaurant_info.get("title", "")
+                        title = title.replace("&amp;", " ")
+                        road_address = restaurant_info.get("roadAddress", "")
+                        if title and road_address:
+                            short_address = " ".join(road_address.split()[:3])
+                            search_keyword = f"{title} {short_address}"
+                            save_failed_keyword(FAILED_KEYWORDS_FILE, search_keyword)
+                            failed_keywords.add(search_keyword)
                     
                     if crawled_data:
                         # 새 파일이 필요한지 확인

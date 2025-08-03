@@ -81,11 +81,12 @@ def main():
         os.makedirs(project_root / "data")
 
     locations_file_path = project_root / "crawl" / "locations.txt"
-    output_jsonl_path = project_root / "data" / "restaurants.jsonl"
+    output_jsonl_path = project_root / "data" / "restaurants2.jsonl"
     food_keywords_file_path = project_root / "crawl" / "food_keywords.txt"
 
-    # Load existing restaurant keys to prevent duplicates
+    # Load existing restaurant keys and queries to prevent duplicates and reprocessing
     existing_restaurant_keys = set()
+    existing_queries = set()
     if output_jsonl_path.exists():
         with open(output_jsonl_path, 'r', encoding='utf-8') as f:
             for line in f:
@@ -95,9 +96,14 @@ def main():
                     key = f"{restaurant.get('title', '')}{restaurant.get('mapx', '')}{restaurant.get('mapy', '')}"
                     if key:
                         existing_restaurant_keys.add(key)
+                    # Track existing queries
+                    query = restaurant.get('query', '')
+                    if query:
+                        existing_queries.add(query)
                 except json.JSONDecodeError:
                     print(f"Warning: Could not decode JSON from line: {line.strip()}")
     print(f"Loaded {len(existing_restaurant_keys)} existing restaurant keys to prevent duplication.")
+    print(f"Loaded {len(existing_queries)} existing queries to prevent reprocessing.")
 
     # Read all valid locations, ignoring comments and empty lines.
     try:
@@ -124,11 +130,19 @@ def main():
         return
 
     newly_added_count = 0
+    skipped_queries_count = 0
     # Open the file in append mode ('a') to add new results without overwriting.
     with open(output_jsonl_path, 'a', encoding='utf-8') as f:
         for location in locations:
             for food_keyword in food_keywords:
                 query = f"{location} {food_keyword}"
+                
+                # Skip if this query has already been processed
+                if query in existing_queries:
+                    skipped_queries_count += 1
+                    print(f"Skipping already processed query: {query}")
+                    continue
+                
                 print(f"Searching for: {query}")
                 items = search_naver_local(query, naver_client_id, naver_client_secret)
                 
@@ -139,6 +153,7 @@ def main():
                         "roadAddress": item.get("roadAddress", ""),
                         "mapx": item.get("mapx", ""),
                         "mapy": item.get("mapy", ""),
+                        "query": query,
                     }
                     
                     # Create a unique key and check for duplicates before writing
@@ -152,6 +167,9 @@ def main():
         print("No new restaurants found in this run.")
     else:
         print(f"Successfully appended {newly_added_count} new restaurants to {output_jsonl_path}")
+    
+    if skipped_queries_count > 0:
+        print(f"Skipped {skipped_queries_count} queries that were already processed.")
 
 if __name__ == "__main__":
     main()
