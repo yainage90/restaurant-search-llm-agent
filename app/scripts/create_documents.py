@@ -176,8 +176,8 @@ def create_summary(
     임베딩을 위한 요약 텍스트 생성
     """
     # 메뉴명 추출
-    menu_names = [menu.get("name", "") for menu in menus if menu.get("name")]
-    all_menus = menu_names + (review_food or [])
+    menus = [f"{menu.get("name", "")}({menu.get("price", "N/A")}원)" for menu in menus if menu.get("name")]
+    all_menus = menus + (review_food or [])
     
     summary_parts = [
         f"식당 이름: {title}",
