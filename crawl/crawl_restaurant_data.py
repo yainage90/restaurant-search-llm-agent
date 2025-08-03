@@ -69,7 +69,7 @@ config = CrawlerConfig()
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INPUT_FILE = os.path.join(BASE_DIR, "../data/restaurants.jsonl")
 OUTPUT_DIR = os.path.join(BASE_DIR, "../data/crawled_restaurants")
-FAILED_KEYWORDS_FILE = os.path.join(BASE_DIR, "../data/failed_keywords.txt")
+FAILED_QUERIES_FILE = os.path.join(BASE_DIR, "../data/crawl_failed_queries.txt")
 MAX_RECORDS_PER_FILE = 1000
 
 # 로깅 설정
@@ -734,7 +734,7 @@ def main():
     driver = get_driver()
     wait = WebDriverWait(driver, config.default_wait_time)
     crawled_place_ids, search_keyword_to_place_id = load_existing_crawled_data(OUTPUT_DIR)
-    failed_keywords = load_failed_keywords(FAILED_KEYWORDS_FILE)
+    failed_keywords = load_failed_keywords(FAILED_QUERIES_FILE)
 
     processed_count = 0
     success_count = 0
@@ -759,7 +759,7 @@ def main():
                         if title and road_address:
                             short_address = " ".join(road_address.split()[:3])
                             search_keyword = f"{title} {short_address}"
-                            save_failed_keyword(FAILED_KEYWORDS_FILE, search_keyword)
+                            save_failed_keyword(FAILED_QUERIES_FILE, search_keyword)
                             failed_keywords.add(search_keyword)
                     
                     if crawled_data:
