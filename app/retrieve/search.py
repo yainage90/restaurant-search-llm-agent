@@ -77,7 +77,7 @@ def build_elasticsearch_query(
     """구조화된 쿼리를 바탕으로 Elasticsearch 쿼리 생성"""
     
     es_query = {
-        "size": 5,
+        "size": 3,
         "_source": {
             "includes": ["place_id", "summary"],
         },
