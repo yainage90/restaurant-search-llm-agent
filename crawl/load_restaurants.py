@@ -82,7 +82,7 @@ def main():
         os.makedirs(project_root / "data")
 
     locations_file_path = project_root / "crawl" / "locations.txt"
-    output_jsonl_path = project_root / "data" / "restaurants2.jsonl"
+    output_jsonl_path = project_root / "data" / "restaurants.jsonl"
     food_keywords_file_path = project_root / "crawl" / "food_keywords.txt"
     failed_queries_file_path = project_root / "data" / "load_failed_queries.txt"
 
