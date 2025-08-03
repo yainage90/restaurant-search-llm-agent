@@ -89,9 +89,10 @@ def test_generation():
 
     try:
         generated_text = generate(query, context)
+        print(f"query: {query}")
+        print(f"context: \n{context}")
         print("=== 생성된 응답 ===")
         print(generated_text)
-        print("\n=== 테스트 완료 ===")
     except Exception as e:
         print(f"테스트 실행 중 오류 발생: {e}")
 
