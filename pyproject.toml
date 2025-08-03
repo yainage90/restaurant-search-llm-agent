@@ -13,4 +13,5 @@ dependencies = [
     "google-genai>=1.28.0",
     "numpy>=2.3.2",
     "elasticsearch>=9.1.0",
+    "tavily-python>=0.7.10",
 ]
