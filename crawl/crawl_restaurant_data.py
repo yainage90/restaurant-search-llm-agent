@@ -2,6 +2,7 @@
 import json
 import re
 import logging
+import random
 # typing 라이브러리는 사용하지 않음 (Python 3.13)
 from dataclasses import dataclass
 from selenium import webdriver
@@ -743,61 +744,69 @@ def main():
     current_file_handle = None
     
     try:
+        # INPUT_FILE을 읽고 랜덤으로 셔플
+        logger.info(f"INPUT_FILE 읽는 중: {INPUT_FILE}")
         with open(INPUT_FILE, 'r', encoding='utf-8') as f_in:
-            for line in f_in:
-                try:
-                    restaurant_info = json.loads(line.strip())
-                    processed_count += 1
-                    
-                    crawled_data, should_record_failure = process_restaurant(driver, wait, restaurant_info, crawled_place_ids, search_keyword_to_place_id, failed_keywords)
-                    
-                    # 실패한 경우 기록
-                    if should_record_failure and crawled_data is None:
-                        title = restaurant_info.get("title", "")
-                        title = title.replace("&amp;", " ")
-                        road_address = restaurant_info.get("roadAddress", "")
-                        if title and road_address:
-                            short_address = " ".join(road_address.split()[:3])
-                            search_keyword = f"{title} {short_address}"
-                            save_failed_keyword(FAILED_QUERIES_FILE, search_keyword)
-                            failed_keywords.add(search_keyword)
-                    
-                    if crawled_data:
-                        # 새 파일이 필요한지 확인
-                        if current_file_handle is None or current_file_record_count >= MAX_RECORDS_PER_FILE:
-                            if current_file_handle:
-                                current_file_handle.close()
-                            
-                            current_output_file = get_current_part_file_path(OUTPUT_DIR)
-                            current_file_handle = open(current_output_file, 'a', encoding='utf-8')
-                            
-                            # 기존 파일의 레코드 수 확인
-                            if os.path.exists(current_output_file):
-                                with open(current_output_file, 'r', encoding='utf-8') as temp_f:
-                                    current_file_record_count = sum(1 for temp_line in temp_f if temp_line.strip())
-                            else:
-                                current_file_record_count = 0
-                            
-                            logger.info(f"새 출력 파일 사용: {current_output_file} (현재 레코드 수: {current_file_record_count})")
+            lines = f_in.readlines()
+        
+        logger.info(f"총 {len(lines)}개 레스토랑 데이터 로드됨")
+        random.shuffle(lines)
+        logger.info("레스토랑 데이터를 랜덤으로 셔플했습니다")
+        
+        for line in lines:
+            try:
+                restaurant_info = json.loads(line.strip())
+                processed_count += 1
+                
+                crawled_data, should_record_failure = process_restaurant(driver, wait, restaurant_info, crawled_place_ids, search_keyword_to_place_id, failed_keywords)
+                
+                # 실패한 경우 기록
+                if should_record_failure and crawled_data is None:
+                    title = restaurant_info.get("title", "")
+                    title = title.replace("&amp;", " ")
+                    road_address = restaurant_info.get("roadAddress", "")
+                    if title and road_address:
+                        short_address = " ".join(road_address.split()[:3])
+                        search_keyword = f"{title} {short_address}"
+                        save_failed_keyword(FAILED_QUERIES_FILE, search_keyword)
+                        failed_keywords.add(search_keyword)
+                
+                if crawled_data:
+                    # 새 파일이 필요한지 확인
+                    if current_file_handle is None or current_file_record_count >= MAX_RECORDS_PER_FILE:
+                        if current_file_handle:
+                            current_file_handle.close()
                         
-                        # 데이터 쓰기
-                        current_file_handle.write(json.dumps(crawled_data, ensure_ascii=False) + '\n')
-                        current_file_handle.flush()  # 즉시 파일에 쓰기
-                        current_file_record_count += 1
+                        current_output_file = get_current_part_file_path(OUTPUT_DIR)
+                        current_file_handle = open(current_output_file, 'a', encoding='utf-8')
                         
-                        # 성공한 크롤링 데이터를 메모리에도 업데이트
-                        place_id = crawled_data['place_id']
-                        search_keyword = crawled_data['search_keyword']
-                        crawled_place_ids.add(place_id)
-                        search_keyword_to_place_id[search_keyword] = place_id
-                        success_count += 1
+                        # 기존 파일의 레코드 수 확인
+                        if os.path.exists(current_output_file):
+                            with open(current_output_file, 'r', encoding='utf-8') as temp_f:
+                                current_file_record_count = sum(1 for temp_line in temp_f if temp_line.strip())
+                        else:
+                            current_file_record_count = 0
                         
-                except json.JSONDecodeError as e:
-                    logger.error(f"JSON 파싱 오류: {e}")
-                    continue
-                except Exception as e:
-                    logger.error(f"예상치 못한 오류 발생: {e}")
-                    continue
+                        logger.info(f"새 출력 파일 사용: {current_output_file} (현재 레코드 수: {current_file_record_count})")
+                    
+                    # 데이터 쓰기
+                    current_file_handle.write(json.dumps(crawled_data, ensure_ascii=False) + '\n')
+                    current_file_handle.flush()  # 즉시 파일에 쓰기
+                    current_file_record_count += 1
+                    
+                    # 성공한 크롤링 데이터를 메모리에도 업데이트
+                    place_id = crawled_data['place_id']
+                    search_keyword = crawled_data['search_keyword']
+                    crawled_place_ids.add(place_id)
+                    search_keyword_to_place_id[search_keyword] = place_id
+                    success_count += 1
+                    
+            except json.JSONDecodeError as e:
+                logger.error(f"JSON 파싱 오류: {e}")
+                continue
+            except Exception as e:
+                logger.error(f"예상치 못한 오류 발생: {e}")
+                continue
 
     finally:
         if current_file_handle:
