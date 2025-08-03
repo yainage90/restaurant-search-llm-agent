@@ -17,7 +17,7 @@ def search_with_tavily(query: str):
     response = client.search(
         query=query,
         max_results=3,
-        search_depth='advanced',
+        search_depth='basic',
     )
 
     docs = [
