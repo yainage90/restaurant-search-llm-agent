@@ -181,11 +181,12 @@ def main():
                             continue
                         
                         restaurant_data = {
-                            "title": clean_html(item.get("title", "")),
+                            "title": clean_html(item.get("title")),
+                            "category": item.get("category"),
                             "address": item.get("address", ""),
-                            "roadAddress": item.get("roadAddress", ""),
-                            "mapx": item.get("mapx", ""),
-                            "mapy": item.get("mapy", ""),
+                            "roadAddress": item.get("roadAddress"),
+                            "mapx": item.get("mapx"),
+                            "mapy": item.get("mapy"),
                             "query": query,
                         }
                         existing_queries.add(query)
