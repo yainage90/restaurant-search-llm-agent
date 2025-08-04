@@ -153,13 +153,20 @@ class LLMFeatures(BaseModel):
 llm = genai.Client()
 
 
-def convert_category(category: list[str]) -> str:
-    category = category.split(">")[0].strip()
-    if "," in category:
-        return [c.strip() for c in category.split(",")]
-    else:
-        return [category]
+def convert_category(category: str) -> str:
+    categories = [c.strip() for c in category.split(">")]
+    if categories[0] != "음식점":
+        category = categories[0]
+    elif len(categories) > 1:
+        category = categories[1]
 
+    if "," in category:
+        category = [c.strip() for c in category.split(",")]
+    else:
+        category = [category]
+
+    return category
+    
 
 def convert_price_to_int(price_str: str) -> int | None:
     """
@@ -284,11 +291,14 @@ def process_restaurant(raw_data: dict[str, Any]) -> dict[str, Any]:
     원본 식당 데이터를 검색용 문서로 변환
     """
     # 1. 전처리
+    # 카테고리 클리닝
+
+    processed_category = convert_category(raw_data["category"])
+
     # 가격 변환
     processed_menus = []
     for menu in raw_data.get("menus", []):
         processed_menu = menu.copy()
-        processed_menu["category"] = convert_category(processed_menu)
         processed_menu["price"] = convert_price_to_int(processed_menu["price"])
         processed_menus.append(processed_menu)
     
@@ -326,6 +336,7 @@ def process_restaurant(raw_data: dict[str, Any]) -> dict[str, Any]:
     document = {
         "place_id": raw_data.get("place_id"),
         "title": raw_data.get("title"),
+        "category": processed_category,
         "address": raw_data.get("address"),
         "roadAddress": raw_data.get("roadAddress"),
         "location": {
