@@ -3,6 +3,8 @@ import json
 import re
 import logging
 import random
+import threading
+from concurrent.futures import ThreadPoolExecutor
 # typing 라이브러리는 사용하지 않음 (Python 3.13)
 from dataclasses import dataclass
 from selenium import webdriver
@@ -16,8 +18,11 @@ import os
 @dataclass
 class CrawlerConfig:
     base_url: str = "https://map.naver.com/p/search/"
-    default_wait_time: int = 1.5
+    default_wait_time: float = 1  # 1.5 -> 0.8초로 단축
     max_review_clicks: int = 10
+    scroll_wait_time: float = 1  # 스크롤 대기 시간
+    click_wait_time: float = 1   # 클릭 후 대기 시간
+    max_workers: int = 2  # 병렬 처리 워커 수 (너무 많으면 IP 차단 위험)
     
     # CSS Selectors
     search_iframe_id: str = "searchIframe"
@@ -83,6 +88,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# 파일 쓰기를 위한 전역 락
+file_write_lock = threading.Lock()
+
 def get_driver() -> webdriver.Chrome:
     """WebDriver를 설정하고 반환합니다."""
     logger.info("WebDriver 초기화 중...")
@@ -90,7 +98,27 @@ def get_driver() -> webdriver.Chrome:
     # options.add_argument("--headless")
     options.add_argument("--start-maximized")
     options.add_argument("user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+    
+    # 성능 최적화 옵션 추가
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--disable-extensions")
+    options.add_argument("--disable-plugins")
+    options.add_argument("--disable-images")  # 이미지 로딩 비활성화
+    options.add_experimental_option("useAutomationExtension", False)
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    
+    # 페이지 로딩 전략 설정
+    prefs = {
+        "profile.managed_default_content_settings.images": 2,  # 이미지 차단
+        "profile.managed_default_content_settings.stylesheets": 2,  # CSS 차단 (선택적)
+    }
+    options.add_experimental_option("prefs", prefs)
+    
     driver = webdriver.Chrome(options=options)
+    # 페이지 로드 타임아웃 설정
+    driver.set_page_load_timeout(5)
     logger.info("WebDriver 초기화 완료")
     return driver
 
@@ -186,7 +214,7 @@ def click_more_button_until_done(driver: webdriver.Chrome, selector: str, max_cl
                 
                 # 효율적인 대기
                 import time
-                time.sleep(config.default_wait_time)
+                time.sleep(config.click_wait_time)  # 더 짧은 대기 시간
                 break
                 
             except TimeoutException:
@@ -377,7 +405,7 @@ def scroll_until_no_new_content(driver: webdriver.Chrome, wait: WebDriverWait, i
             
             # 콘텐츠 로딩 대기 (네트워크 상태에 따라 조절)
             import time
-            time.sleep(config.default_wait_time)
+            time.sleep(config.scroll_wait_time)  # 스크롤 전용 대기 시간
 
             final_item_count = len(driver.find_elements(By.CSS_SELECTOR, item_selector))
             
@@ -409,7 +437,7 @@ def get_menu_data(driver: webdriver.Chrome, wait: WebDriverWait) -> list[dict[st
     if click_count > 0:
         logger.info(f"메뉴 더보기를 {click_count}번 클릭했습니다.")
         import time
-        time.sleep(config.default_wait_time)
+        time.sleep(config.click_wait_time)  # 더 짧은 대기 시간
 
     # 무한 스크롤 처리 (e.g., 스타벅스)
     # "더보기" 버튼이 없는 무한 스크롤 방식의 페이지에 대응합니다.
@@ -421,7 +449,7 @@ def get_menu_data(driver: webdriver.Chrome, wait: WebDriverWait) -> list[dict[st
             scroll_until_no_new_content(driver, wait, infinite_scroll_selector)
             # 스크롤 후 잠시 대기하여 DOM 안정화
             import time
-            time.sleep(1)
+            time.sleep(config.scroll_wait_time)  # 설정 가능한 대기 시간
     except Exception as e:
         logger.warning(f"무한 스크롤 확인 중 오류 발생: {e}")
 
@@ -600,11 +628,12 @@ def load_failed_keywords(failed_keywords_file: str) -> set[str]:
     return failed_keywords
 
 def save_failed_keyword(failed_keywords_file: str, keyword: str):
-    """실패한 검색어를 파일에 기록합니다."""
-    os.makedirs(os.path.dirname(failed_keywords_file), exist_ok=True)
-    with open(failed_keywords_file, 'a', encoding='utf-8') as f:
-        f.write(keyword + '\n')
-    logger.info(f"실패한 검색어 기록: {keyword}")
+    """실패한 검색어를 파일에 기록합니다. (스레드 안전)"""
+    with file_write_lock:
+        os.makedirs(os.path.dirname(failed_keywords_file), exist_ok=True)
+        with open(failed_keywords_file, 'a', encoding='utf-8') as f:
+            f.write(keyword + '\n')
+        logger.info(f"실패한 검색어 기록: {keyword}")
 
 def extract_place_id_from_url(url: str) -> str | None:
     """
@@ -699,38 +728,226 @@ def process_restaurant(driver: webdriver.Chrome, wait: WebDriverWait, restaurant
         return None, True  # 실패 상황으로 기록
 
 def get_current_part_file_path(output_dir: str) -> str:
-    """현재 사용할 part 파일 경로를 반환합니다."""
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+    """현재 사용할 part 파일 경로를 반환합니다. (스레드 안전)"""
+    with file_write_lock:
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        
+        # 기존 part 파일들 중 가장 높은 번호 찾기
+        max_part_num = -1
+        current_file_record_count = 0
+        
+        for filename in os.listdir(output_dir):
+            if filename.startswith('part-') and filename.endswith('.jsonl'):
+                try:
+                    part_num = int(filename.split('-')[1].split('.')[0])
+                    max_part_num = max(max_part_num, part_num)
+                except (ValueError, IndexError):
+                    continue
+        
+        # 현재 파일의 레코드 수 확인
+        if max_part_num >= 0:
+            current_file_path = os.path.join(output_dir, f"part-{max_part_num:05d}.jsonl")
+            if os.path.exists(current_file_path):
+                with open(current_file_path, 'r', encoding='utf-8') as f:
+                    current_file_record_count = sum(1 for line in f if line.strip())
+        
+        # 새 파일이 필요한지 확인
+        if max_part_num < 0 or current_file_record_count >= MAX_RECORDS_PER_FILE:
+            max_part_num += 1
+        
+        return os.path.join(output_dir, f"part-{max_part_num:05d}.jsonl")
+
+def process_batch_worker(batch_data: list[dict], worker_id: int, shared_state: dict) -> dict:
+    """개별 워커에서 배치 처리를 수행합니다."""
+    worker_logger = logging.getLogger(f"worker_{worker_id}")
+    worker_logger.info(f"워커 {worker_id} 시작: {len(batch_data)}개 아이템 처리")
     
-    # 기존 part 파일들 중 가장 높은 번호 찾기
-    max_part_num = -1
-    current_file_record_count = 0
+    driver = get_driver()
+    wait = WebDriverWait(driver, config.default_wait_time)
     
-    for filename in os.listdir(output_dir):
-        if filename.startswith('part-') and filename.endswith('.jsonl'):
-            try:
-                part_num = int(filename.split('-')[1].split('.')[0])
-                max_part_num = max(max_part_num, part_num)
-            except (ValueError, IndexError):
-                continue
+    processed_count = 0
+    success_count = 0
+    failed_keywords = []
+    results = []
     
-    # 현재 파일의 레코드 수 확인
-    if max_part_num >= 0:
-        current_file_path = os.path.join(output_dir, f"part-{max_part_num:05d}.jsonl")
-        if os.path.exists(current_file_path):
-            with open(current_file_path, 'r', encoding='utf-8') as f:
-                current_file_record_count = sum(1 for line in f if line.strip())
+    try:
+        for restaurant_info in batch_data:
+            crawled_data, should_record_failure = process_restaurant(
+                driver, wait, restaurant_info, 
+                shared_state['crawled_place_ids'], 
+                shared_state['search_keyword_to_place_id'], 
+                shared_state['failed_keywords']
+            )
+            
+            processed_count += 1
+            
+            # 실패한 경우 기록
+            if should_record_failure and crawled_data is None:
+                title = restaurant_info.get("title", "")
+                title = title.replace("&amp;", " ")
+                road_address = restaurant_info.get("roadAddress", "")
+                if title and road_address:
+                    short_address = " ".join(road_address.split()[:3])
+                    search_keyword = f"{title} {short_address}"
+                    failed_keywords.append(search_keyword)
+            
+            if crawled_data:
+                results.append(crawled_data)
+                success_count += 1
     
-    # 새 파일이 필요한지 확인
-    if max_part_num < 0 or current_file_record_count >= MAX_RECORDS_PER_FILE:
-        max_part_num += 1
+    except Exception as e:
+        worker_logger.error(f"워커 {worker_id} 오류: {e}")
+    finally:
+        driver.quit()
     
-    return os.path.join(output_dir, f"part-{max_part_num:05d}.jsonl")
+    worker_logger.info(f"워커 {worker_id} 완료: {processed_count}개 처리, {success_count}개 성공")
+    return {
+        'worker_id': worker_id,
+        'processed_count': processed_count,
+        'success_count': success_count,
+        'results': results,
+        'failed_keywords': failed_keywords
+    }
+
+def save_batch_results(results: list[dict], output_dir: str) -> int:
+    """배치 결과를 파일에 저장합니다. (스레드 안전)"""
+    if not results:
+        return 0
+    
+    saved_count = 0
+    
+    # 전체 저장 과정을 락으로 보호
+    with file_write_lock:
+        try:
+            # 모든 결과를 한 번에 저장하여 파일 핸들 경쟁 상태 방지
+            current_file_record_count = 0
+            current_output_file = None
+            current_file_handle = None
+            
+            for result in results:
+                # 새 파일이 필요한지 확인
+                if current_file_handle is None or current_file_record_count >= MAX_RECORDS_PER_FILE:
+                    if current_file_handle:
+                        current_file_handle.close()
+                    
+                    current_output_file = get_current_part_file_path(output_dir)
+                    current_file_handle = open(current_output_file, 'a', encoding='utf-8')
+                    
+                    # 기존 파일의 레코드 수 다시 확인 (락 안에서)
+                    if os.path.exists(current_output_file):
+                        with open(current_output_file, 'r', encoding='utf-8') as temp_f:
+                            current_file_record_count = sum(1 for temp_line in temp_f if temp_line.strip())
+                    else:
+                        current_file_record_count = 0
+                    
+                    logger.info(f"새 출력 파일 사용: {current_output_file} (현재 레코드 수: {current_file_record_count})")
+                
+                # 데이터 쓰기
+                current_file_handle.write(json.dumps(result, ensure_ascii=False) + '\n')
+                current_file_handle.flush()  # 즉시 파일에 쓰기
+                current_file_record_count += 1
+                saved_count += 1
+                        
+            if current_file_handle:
+                current_file_handle.close()
+                
+        except Exception as e:
+            logger.error(f"배치 결과 저장 중 오류: {e}")
+            if 'current_file_handle' in locals() and current_file_handle:
+                current_file_handle.close()
+    
+    return saved_count
 
 def main():
-    """메인 크롤링 로직을 실행합니다."""
-    logger.info("크롤링 시작")
+    """메인 크롤링 로직을 실행합니다 (병렬 처리 버전)."""
+    logger.info("크롤링 시작 (병렬 처리 모드)")
+    
+    crawled_place_ids, search_keyword_to_place_id = load_existing_crawled_data(OUTPUT_DIR)
+    failed_keywords = load_failed_keywords(FAILED_QUERIES_FILE)
+    
+    # 공유 상태
+    shared_state = {
+        'crawled_place_ids': crawled_place_ids,
+        'search_keyword_to_place_id': search_keyword_to_place_id,
+        'failed_keywords': failed_keywords
+    }
+    
+    try:
+        # INPUT_FILE을 읽고 랜덤으로 셔플
+        logger.info(f"INPUT_FILE 읽는 중: {INPUT_FILE}")
+        with open(INPUT_FILE, 'r', encoding='utf-8') as f_in:
+            lines = f_in.readlines()
+        
+        logger.info(f"총 {len(lines)}개 레스토랑 데이터 로드됨")
+        random.shuffle(lines)
+        logger.info("레스토랑 데이터를 랜덤으로 셔플했습니다")
+        
+        # 레스토랑 데이터를 배치로 분할
+        restaurant_data = []
+        for line in lines:
+            try:
+                restaurant_info = json.loads(line.strip())
+                restaurant_data.append(restaurant_info)
+            except json.JSONDecodeError as e:
+                logger.error(f"JSON 파싱 오류: {e}")
+                continue
+        
+        # 워커 수에 맞게 배치 분할
+        batch_size = max(1, len(restaurant_data) // (config.max_workers * 2))  # 워커당 2배치 정도
+        batches = [restaurant_data[i:i + batch_size] for i in range(0, len(restaurant_data), batch_size)]
+        
+        logger.info(f"{len(batches)}개 배치로 분할됨 (배치당 평균 {batch_size}개 아이템)")
+        logger.info(f"{config.max_workers}개 워커로 병렬 처리 시작")
+        
+        total_processed = 0
+        total_success = 0
+        all_failed_keywords = set(failed_keywords)
+        
+        # ThreadPoolExecutor 사용 (프로세스 풀보다 메모리 효율적)
+        with ThreadPoolExecutor(max_workers=config.max_workers) as executor:
+            # 배치를 워커에 분배
+            futures = []
+            for i, batch in enumerate(batches):
+                future = executor.submit(process_batch_worker, batch, i, shared_state)
+                futures.append(future)
+            
+            # 결과 수집 및 처리
+            for future in futures:
+                try:
+                    result = future.result(timeout=300)  # 5분 타임아웃
+                    total_processed += result['processed_count']
+                    total_success += result['success_count']
+                    
+                    # 실패한 키워드 업데이트
+                    for keyword in result['failed_keywords']:
+                        if keyword not in all_failed_keywords:
+                            save_failed_keyword(FAILED_QUERIES_FILE, keyword)
+                            all_failed_keywords.add(keyword)
+                    
+                    # 결과 저장
+                    if result['results']:
+                        saved_count = save_batch_results(result['results'], OUTPUT_DIR)
+                        logger.info(f"워커 {result['worker_id']} 결과 저장 완료: {saved_count}개")
+                        
+                        # 성공한 크롤링 데이터를 공유 상태에 업데이트
+                        for crawled_data in result['results']:
+                            place_id = crawled_data['place_id']
+                            search_keyword = crawled_data['search_keyword']
+                            shared_state['crawled_place_ids'].add(place_id)
+                            shared_state['search_keyword_to_place_id'][search_keyword] = place_id
+                    
+                except Exception as e:
+                    logger.error(f"워커 결과 처리 중 오류: {e}")
+        
+        logger.info(f"병렬 크롤링 완료: 총 {total_processed}개 처리, {total_success}개 성공")
+        
+    except Exception as e:
+        logger.error(f"메인 프로세스 오류: {e}")
+
+def main_sequential():
+    """기존 순차 처리 방식 (백업용)."""
+    logger.info("크롤링 시작 (순차 처리 모드)")
     
     driver = get_driver()
     wait = WebDriverWait(driver, config.default_wait_time)
@@ -815,4 +1032,9 @@ def main():
         logger.info(f"크롤링 완료: 총 {processed_count}개 처리, {success_count}개 성공")
 
 if __name__ == "__main__":
-    main()
+    # 환경변수로 실행 모드 선택 가능
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "--sequential":
+        main_sequential()
+    else:
+        main()  # 기본값: 병렬 처리
