@@ -4,6 +4,7 @@ import json
 import glob
 from elasticsearch import Elasticsearch
 from elasticsearch.helpers import bulk
+from app.retrieve.embeddings import EMBEDDING_SIZE
 from typing import Any
 
 
@@ -32,16 +33,16 @@ def create_index_mapping(es: Elasticsearch, index_name: str) -> None:
                 "place_id": {"type": "keyword"},
                 "title": {
                     "type": "text",
-                    "analyzer": "standard",
+                    "analyzer": "korean_analyzer",
                     "fields": {
-                        "keyword": {"type": "keyword"}
+                        "raw": {"type": "keyword"}
                     }
                 },
-                "address": {"type": "text", "analyzer": "standard"},
-                "roadAddress": {"type": "text", "analyzer": "standard"},
+                "address": {"type": "text", "analyzer": "korean_analyzer"},
+                "roadAddress": {"type": "text", "analyzer": "korean_analyzer"},
                 "pin": {
                     "properties": {
-                        "location": {
+                        "coordinate": {
                             "type": "geo_point",
                         }
                     }
@@ -49,21 +50,57 @@ def create_index_mapping(es: Elasticsearch, index_name: str) -> None:
                 "menus": {
                     "type": "nested",
                     "properties": {
-                        "name": {"type": "text", "analyzer": "standard"},
+                        "name": {
+                            "type": "text",
+                            "analyzer": "korean_analyzer",
+                            "fields": {
+                                "raw": {"type": "keyword"},
+                            }
+                        },
                         "price": {"type": "integer"}
                     }
                 },
-                "reviews": {"type": "text", "analyzer": "standard"},
-                "description": {"type": "text", "analyzer": "standard"},
-                "review_food": {"type": "keyword"},
-                "convenience": {"type": "keyword"},
-                "atmosphere": {"type": "keyword"},
-                "occasion": {"type": "keyword"},
-                "features": {"type": "keyword"},
-                "summary": {"type": "text", "analyzer": "standard"},
+                "reviews": {"type": "text", "analyzer": "korean_analyzer"},
+                "description": {"type": "text", "analyzer": "korean_analyzer"},
+                "review_food": {
+                    "type": "text",
+                    "analyzer": "korean_analyzer",
+                    "fields": {
+                        "raw": {"type": "keyword"},
+                    }
+                },
+                "convenience": {
+                    "type": "text",
+                    "analyzer": "korean_analyzer",
+                    "fields": {
+                        "raw": {"type": "keyword"},
+                    }
+                },
+                "atmosphere": {
+                    "type": "text",
+                    "analyzer": "korean_analyzer",
+                    "fields": {
+                        "raw": {"type": "keyword"},
+                    }
+                },
+                "occasion": {
+                    "type": "text",
+                    "analyzer": "korean_analyzer",
+                    "fields": {
+                        "raw": {"type": "keyword"},
+                    }
+                },
+                "features": {
+                    "type": "text",
+                    "analyzer": "korean_analyzer",
+                    "fields": {
+                        "raw": {"type": "keyword"},
+                    }
+                },
+                "summary": {"type": "text", "analyzer": "korean_analyzer"},
                 "embedding": {
                     "type": "dense_vector",
-                    "dims": 768,
+                    "dims": EMBEDDING_SIZE,
                     "index": True,
                     "similarity": "dot_product",
                     "index_options": {
@@ -77,6 +114,21 @@ def create_index_mapping(es: Elasticsearch, index_name: str) -> None:
                 "number_of_shards": 1,
                 "number_of_replicas": 1
             },
+            "analysis": {
+                "analyzer": {
+                    "korean_analyzer": {
+                        "type": "nori",
+                        "tokenizer": "nori_tokenizer",
+                        "filter": ["nori_part_of_speech", "lowercase"]
+                    }
+                },
+                "tokenizer": {
+                    "nori_tokenizer": {
+                        "type": "nori_tokenizer",
+                        "decompound_mode": "mixed"
+                    }
+                }
+            }
         }
     }
     
@@ -96,7 +148,7 @@ def preprocess_document(doc: dict[str, Any]) -> dict[str, Any]:
     
     # 위치 정보 추가 (geo_point 형식)
     processed_doc["pin"] = {
-        "location": doc["location"],
+        "coordinate": doc["coordinate"],
     }
     
     # 메뉴 가격을 정수로 변환 (이미 변환되어 있다면 그대로 유지)
@@ -111,18 +163,6 @@ def preprocess_document(doc: dict[str, Any]) -> dict[str, Any]:
                     menu["price"] = 0
     
     return processed_doc
-
-
-def index_document(es: Elasticsearch, index_name: str, doc: dict[str, Any]) -> None:
-    """단일 문서 색인"""
-    processed_doc = preprocess_document(doc)
-    place_id = processed_doc.get("place_id")
-    
-    es.index(
-        index=index_name,
-        id=place_id,
-        body=processed_doc
-    )
 
 
 def bulk_index_documents(es: Elasticsearch, index_name: str, documents: list[dict[str, Any]]) -> None:
