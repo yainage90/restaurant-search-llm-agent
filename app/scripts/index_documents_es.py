@@ -181,7 +181,7 @@ def bulk_index_documents(es: Elasticsearch, index_name: str, documents: list[dic
         actions.append(action)
     
     # 배치 크기별로 나누어 색인
-    batch_size = 100
+    batch_size = 500
     for i in range(0, len(actions), batch_size):
         batch = actions[i:i + batch_size]
         bulk(es, batch)
