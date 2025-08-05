@@ -341,16 +341,16 @@ def process_restaurant(raw_data: dict[str, Any]) -> dict[str, Any]:
     
     # 3. 요약 생성
     summary = create_summary(
-        raw_data.get("title", ""),
-        raw_data.get("category"),
-        raw_data.get("address", ""),
-        raw_data.get("roadAddress", ""),
-        processed_menus,
-        extracted_features.get("review_food"),
-        extracted_features.get("convenience"),
-        extracted_features.get("atmosphere"),
-        extracted_features.get("occasion"),
-        extracted_features.get("features")
+        title=raw_data.get("title", ""),
+        category=processed_category,
+        address=raw_data.get("address", ""),
+        road_address=raw_data.get("roadAddress", ""),
+        menus=processed_menus,
+        review_food=extracted_features.get("review_food"),
+        convenience=extracted_features.get("convenience"),
+        atmosphere=extracted_features.get("atmosphere"),
+        occasion=extracted_features.get("occasion"),
+        features=extracted_features.get("features")
     )
     
     # 4. 임베딩 추출
