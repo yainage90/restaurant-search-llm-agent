@@ -120,30 +120,87 @@ def test_search_module(query: str) -> tuple[str, str, str]:
         return error_msg, error_msg, error_msg
 
 
-def test_relevance_module(query: str, mock_results: str) -> str:
-    """연관성 평가 모듈 테스트"""
+def get_relevance_evaluation(query: str) -> str:
+    """연관성 평가 결과만 반환"""
     try:
-        if not mock_results.strip():
-            # 기본 테스트 문서 사용
-            documents = [
-                {
-                    "title": "스시히로바",
-                    "address": "서울특별시 강남구 테헤란로 123",
-                    "menus": [{"name": "초밥세트", "price": 35000}],
-                    "convenience": ["주차", "예약"],
-                    "atmosphere": ["고급스러운"],
-                    "summary": "강남 최고의 일식 전문점으로 신선한 초밥을 제공합니다."
-                }
-            ]
+        # 실제 Elasticsearch 검색 수행
+        documents = search_restaurants(query)
+        
+        if not documents:
+            return "검색 결과가 없습니다."
+        
+        # 연관성 평가 수행
+        relevance_result = grade_relevance(query, documents)
+        
+        # 결과 포맷팅
+        result_text = f"=== 연관성 평가 결과 ===\n"
+        result_text += f"쿼리: {query}\n"
+        result_text += f"검색된 문서 수: {len(documents)}개\n\n"
+        
+        # 연관성 평가 결과 표시
+        if relevance_result:
+            overall_relevance = relevance_result.get("overall_relevance", "알 수 없음")
+            overall_reason = relevance_result.get("reason", "이유 없음")
+            document_scores = relevance_result.get("document_scores", [])
+            
+            result_text += f"전체 연관성: {overall_relevance}\n"
+            result_text += f"전체 판단 근거: {overall_reason}\n\n"
+            
+            if document_scores:
+                result_text += "개별 문서 연관성 평가:\n"
+                for score in document_scores:
+                    doc_id = score.get("document_id", "알 수 없음")
+                    relevance = score.get("relevance", "알 수 없음")
+                    reason = score.get("reason", "이유 없음")
+                    
+                    # 해당 문서의 제목과 요약 가져오기
+                    try:
+                        doc_index = int(doc_id) - 1
+                        if 0 <= doc_index < len(documents):
+                            doc = documents[doc_index]
+                            title = doc.get("title", "제목 없음")
+                        else:
+                            title = "제목 없음"
+                    except (ValueError, TypeError):
+                        title = "제목 없음"
+                    
+                    result_text += f"\n문서 {doc_id}: {title}\n"
+                    result_text += f"   연관성: {relevance}\n"
+                    result_text += f"   판단 근거: {reason}\n"
+            else:
+                result_text += "개별 문서 평가 결과가 없습니다.\n"
         else:
-            # 사용자가 입력한 JSON 파싱
-            documents = json.loads(mock_results)
+            result_text += "연관성 평가 결과를 가져올 수 없습니다.\n"
+            
+        return result_text
         
-        result = grade_relevance(query, documents)
-        return json.dumps(result, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return f"오류 발생: {str(e)}"
+
+
+def get_search_results_summary(query: str) -> str:
+    """검색 결과 요약만 반환"""
+    try:
+        # 실제 Elasticsearch 검색 수행
+        documents = search_restaurants(query)
         
-    except json.JSONDecodeError:
-        return "오류: 잘못된 JSON 형식입니다."
+        if not documents:
+            return "검색 결과가 없습니다."
+        
+        # 검색 결과 요약 표시
+        result_text = f"=== 검색 결과 요약 ===\n"
+        result_text += f"총 {len(documents)}개 문서 검색됨\n\n"
+        
+        for i, doc in enumerate(documents, 1):
+            title = doc.get("title", "제목 없음")
+            summary = doc.get("summary", "요약 정보 없음")
+            search_score = doc.get("_score", "점수 없음")
+            result_text += f"{i}. {title}\n"
+            result_text += f"   검색 점수: {search_score}\n"
+            result_text += f"   요약: {summary}\n\n"
+        
+        return result_text
+        
     except Exception as e:
         return f"오류 발생: {str(e)}"
 
@@ -235,7 +292,7 @@ def create_interface():
                         )
                     
                     # 검색 모듈 테스트
-                    with gr.Tab("🔍 검색 모듈"):
+                    with gr.Tab("🔍 검색"):
                         gr.Markdown("### 쿼리 재작성 → 임베딩 → Elasticsearch 검색 파이프라인을 테스트합니다.")
                         
                         with gr.Row():
@@ -271,7 +328,7 @@ def create_interface():
                     
                     # 연관성 평가 모듈 테스트
                     with gr.Tab("⚖️ 연관성 평가"):
-                        gr.Markdown("### 검색된 문서들의 연관성을 LLM으로 평가하는 모듈을 테스트합니다.")
+                        gr.Markdown("### 실제 Elasticsearch 검색 결과에 대한 연관성 평가와 요약 정보를 표시합니다.")
                         
                         with gr.Row():
                             with gr.Column():
@@ -280,53 +337,35 @@ def create_interface():
                                     placeholder="예: 강남역 주차되는 일식집",
                                     value="강남역 주차되는 일식집"
                                 )
-                                mock_documents_input = gr.Code(
-                                    label="테스트 문서 (JSON 배열, 비워두면 기본 예시 사용)",
-                                    language="json",
-                                    lines=10,
-                                    value=""
+                                relevance_btn = gr.Button("연관성 평가 실행", variant="primary")
+                                
+                                # 연관성 평가 결과 (왼쪽 아래)
+                                relevance_output = gr.Textbox(
+                                    label="연관성 평가 결과",
+                                    lines=30,
+                                    max_lines=35,
                                 )
-                                relevance_btn = gr.Button("연관성 평가 테스트", variant="primary")
                             
                             with gr.Column():
-                                relevance_output = gr.Code(
-                                    label="연관성 평가 결과",
-                                    language="json",
-                                    lines=20
+                                # 검색 결과 요약 (오른쪽)
+                                search_results_output = gr.Textbox(
+                                    label="검색 결과 요약",
+                                    lines=50,
+                                    max_lines=50,
                                 )
                         
                         relevance_btn.click(
-                            fn=test_relevance_module,
-                            inputs=[relevance_query_input, mock_documents_input],
+                            fn=get_relevance_evaluation,
+                            inputs=[relevance_query_input],
                             outputs=[relevance_output]
                         )
-                    
-                    # 전체 파이프라인 테스트
-                    with gr.Tab("🔗 전체 파이프라인"):
-                        gr.Markdown("### 실제 데이터베이스를 사용한 전체 파이프라인을 테스트합니다.")
                         
-                        with gr.Row():
-                            with gr.Column():
-                                pipeline_query_input = gr.Textbox(
-                                    label="테스트 쿼리",
-                                    placeholder="예: 홍대 삼겹살집 추천해줘",
-                                    value="홍대 삼겹살집 추천해줘"
-                                )
-                                pipeline_btn = gr.Button("전체 파이프라인 테스트", variant="primary")
-                            
-                            with gr.Column():
-                                pipeline_output = gr.Code(
-                                    label="전체 파이프라인 결과",
-                                    language="json",
-                                    lines=25
-                                )
-                        
-                        pipeline_btn.click(
-                            fn=test_full_pipeline,
-                            inputs=[pipeline_query_input],
-                            outputs=[pipeline_output]
+                        relevance_btn.click(
+                            fn=get_search_results_summary,
+                            inputs=[relevance_query_input],
+                            outputs=[search_results_output]
                         )
-                
+                    
                 gr.Markdown("---")
                 gr.Markdown("💡 **사용법**: 각 탭에서 다른 쿼리를 입력해서 각 모듈의 동작을 확인할 수 있습니다.")
     
