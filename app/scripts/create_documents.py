@@ -9,6 +9,7 @@ import re
 from typing import Any
 from dotenv import load_dotenv
 from google import genai
+# from openai import OpenAI
 from pydantic import BaseModel
 from app.retrieve.embeddings import get_document_embeddings
 
@@ -150,7 +151,8 @@ class LLMFeatures(BaseModel):
     features: list[str]
 
 
-llm = genai.Client()
+gemini_client = genai.Client()
+# openai_client = OpenAI()
 
 
 def convert_category(category: str) -> str:
@@ -201,7 +203,7 @@ def convert_coordinates(mapx: str, mapy: str) -> tuple[float, float]:
     return lat, lon
 
 
-def extract_features_with_llm(place_id: str, reviews: list[str], description: str) -> dict[str, list[str]]:
+def extract_features_with_gemini(place_id: str, reviews: list[str], description: str) -> dict[str, list[str]]:
     """
     LLM을 사용하여 리뷰와 설명에서 특징을 추출
     실제 구현시에는 OpenAI API 등을 사용
@@ -215,8 +217,8 @@ def extract_features_with_llm(place_id: str, reviews: list[str], description: st
 
     user_prompt = EXTRACT_FEATURES_PROMPT.format(description=description, reviews=review_text)
 
-    response = llm.models.generate_content(
-        model="gemini-2.5-flash-lite",
+    response = gemini_client.models.generate_content(
+        model="gemini-2.5-flash",
         contents=user_prompt,
         config=genai.types.GenerateContentConfig(
             temperature=0.0,
@@ -224,6 +226,7 @@ def extract_features_with_llm(place_id: str, reviews: list[str], description: st
             response_mime_type="application/json",
             response_schema=LLMFeatures,
             max_output_tokens=1024,
+            thinking_config=genai.types.ThinkingConfig(thinking_budget=0)
         )
     )
 
@@ -243,6 +246,27 @@ def extract_features_with_llm(place_id: str, reviews: list[str], description: st
 
     return llm_features
     
+
+# def extract_features_with_openai(place_id: str, reviews: list[str], description: str) -> dict[str, list[str]]:
+#     num_reviews_to_use = 30
+#     # 리뷰 텍스트 결합 (너무 길면 제한)
+#     review_text = "\n".join(reviews[:num_reviews_to_use])  # 최대 30개 리뷰만 사용
+#     if len(review_text) > 100 * num_reviews_to_use:
+#         review_text = review_text[:100 * num_reviews_to_use]
+
+#     user_prompt = EXTRACT_FEATURES_PROMPT.format(description=description, reviews=review_text)
+
+#     response = openai_client.responses.parse(
+#         model="gpt-4o-mini",
+#         input=[
+#             { "role": "system", "content": SYSTEM_PROMPT },
+#             { "role": "user", "content": user_prompt },
+#         ],
+#         text_format=LLMFeatures,
+#     )
+
+#     return response.output_parsed.model_dump()
+
 
 def create_summary(
     title: str,
@@ -306,7 +330,7 @@ def process_restaurant(raw_data: dict[str, Any]) -> dict[str, Any]:
     lat, lon = convert_coordinates(raw_data.get("mapx"), raw_data.get("mapy"))
     
     # 2. LLM을 사용한 특징 추출
-    extracted_features = extract_features_with_llm(
+    extracted_features = extract_features_with_gemini(
         raw_data["place_id"],
         raw_data.get("reviews", []),
         raw_data.get("description", "")
@@ -339,7 +363,7 @@ def process_restaurant(raw_data: dict[str, Any]) -> dict[str, Any]:
         "category": processed_category,
         "address": raw_data.get("address"),
         "roadAddress": raw_data.get("roadAddress"),
-        "location": {
+        "coordinate": {
             "lat": lat,
             "lon": lon,
         },
