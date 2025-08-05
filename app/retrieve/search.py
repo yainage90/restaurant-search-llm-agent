@@ -93,103 +93,117 @@ def build_elasticsearch_query(
     }
     
     # location 처리
-    # if "location" in structured_query:
-    #     for location in structured_query["location"]:
-    #         if location["relation"] == "exact":
-    #             # 특정 식당명으로 검색
-    #             es_query["knn"]["filter"].append({
-    #                 "match": {
-    #                     "title": {
-    #                         "query": location["name"],
-    #                         "operator": "and",
-    #                         "boost": 3.0
-    #                     }
-    #                 }
-    #             })
-    #         elif location["relation"] == "nearby":
-    #             # 위치 기반 검색
-    #             poi_location = search_naver_poi(location["name"])
-    #             if poi_location:
-    #                 es_query["knn"]["filter"].append({
-    #                     "geo_distance": {
-    #                         "distance": "3km",
-    #                         "pin.location": {
-    #                             "lat": poi_location["lat"],
-    #                             "lon": poi_location["lon"]
-    #                         }
-    #                     }
-    #                 })
+    if "location" in structured_query:
+        for location in structured_query["location"]:
+            if location["relation"] == "exact":
+                # 특정 식당명으로 검색
+                es_query["knn"]["filter"].append({
+                    "match": {
+                        "title": {
+                            "query": location["name"],
+                        }
+                    }
+                })
+            elif location["relation"] == "nearby":
+                # 위치 기반 검색
+                # poi_location = search_naver_poi(location["name"])
+                # if poi_location:
+                #     es_query["knn"]["filter"].append({
+                #         "geo_distance": {
+                #             "distance": "3km",
+                #             "pin.coordinate": {
+                #                 "lat": poi_location["lat"],
+                #                 "lon": poi_location["lon"]
+                #             }
+                #         }
+                #     })
+                pass
     
     # convenience 필터링 (필수 조건)
-    # if "convenience" in structured_query:
-    #     for convenience in structured_query["convenience"]:
-    #         es_query["knn"]["filter"].append({
-    #             "term": {
-    #                 "convenience": convenience
-    #             }
-    #         })
+    if conveniences := structured_query.get("convenience"):
+        conveniences_text = ",".join(conveniences)
+        es_query["knn"]["filter"].append({
+            "match": {
+                "convenience": {
+                    "query": conveniences_text,
+                    "operator": "and",
+                }
+            }
+        })
     
     # cuisine, menu 필터링 (음식 관련)
-    food_should = []
-    # if "cuisine" in structured_query:
-    #     for cuisine in structured_query["cuisine"]:
-    #         food_should.extend([
-    #             {
-    #                 "nested": {
-    #                     "path": "menus",
-    #                     "query": {
-    #                         "match": {
-    #                             "menus.name": {
-    #                                 "query": cuisine,
-    #                                 "operator": "and",
-    #                             }
-    #                         }
-    #                     },
-    #                 },
-    #             },
-    #             {
-    #                 "match": {
-    #                     "review_food": {
-    #                         "query": cuisine,
-    #                         "operator": "and",
-    #                     },
-    #                 },
-    #             }
-    #         ])
+    if cuisine := structured_query.get("cuisine"):
+        es_query["knn"]["filter"].append(
+            {
+                "bool": {
+                    "should": [
+                        {
+                            "match": {
+                                "category": {
+                                    "query": cuisine,
+                                    "operator": "and"
+                                },
+                            }
+                        },
+                        {
+                            "nested": {
+                                "path": "menus",
+                                "query": {
+                                    "match": {
+                                        "menus.name": {
+                                            "query": cuisine,
+                                            "operator": "and",
+                                        }
+                                    }
+                                },
+                            },
+                        },
+                        {
+                            "match": {
+                                "review_food": {
+                                    "query": cuisine,
+                                    "operator": "and",
+                                },
+                            },
+                        }
+                    ],
+                    "minimum_should_match": 1,
+                }
+            }
+        )
     
-    # if "menu" in structured_query:
-    #     for menu in structured_query["menu"]:
-    #         food_should.extend([
-    #             {
-    #                 "nested": {
-    #                     "path": "menus",
-    #                     "query": {
-    #                         "match": {
-    #                             "menus.name": {
-    #                                 "query": menu,
-    #                                 "operator": "and",
-    #                             },
-    #                         },
-    #                     },
-    #                 },
-    #             },
-    #             {
-    #                 "match": {
-    #                     "review_food": {
-    #                         "query": menu,
-    #                         "operator": "and",
-    #                     },
-    #                 },
-    #             },
-    #         ])
-    
-    # if food_should:
-    #     es_query["knn"]["filter"].append({
-    #         "bool": {
-    #             "should": food_should,
-    #             "minimum_should_match": 1
-    #         }
-    #     })
+    if menus := structured_query.get("menu"):
+        menus_text = ",".join(menus)
+        es_query["knn"]["filter"].append(
+            {
+                "bool": {
+                    "should": [
+                        {
+                            "nested": {
+                                "path": "menus",
+                                "query": {
+                                    "match": {
+                                        "menus.name": {
+                                            "query": menus_text,
+                                            "operator": "or",
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                        {
+                            "match": {
+                                "review_food": {
+                                    "query": menus_text,
+                                    "operator": "or",
+                                },
+                            },
+                        },
+                    ],
+                    "minimum_should_match": 1,
+                }
+            }
+        )
 
     return es_query
 
