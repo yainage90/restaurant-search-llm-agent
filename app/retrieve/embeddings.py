@@ -9,7 +9,7 @@ load_dotenv()
 
 client = genai.Client()
 
-EMBEDDING_SIZE = 768
+EMBEDDING_SIZE = 1536
 
 
 class EmbedTaskType(Enum):
