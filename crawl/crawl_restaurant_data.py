@@ -102,7 +102,7 @@ def get_driver() -> webdriver.Chrome:
     # 성능 최적화 옵션 추가
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu")
+    # options.add_argument("--disable-gpu")
     options.add_argument("--disable-extensions")
     options.add_argument("--disable-plugins")
     options.add_argument("--disable-images")  # 이미지 로딩 비활성화
