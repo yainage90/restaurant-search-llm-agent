@@ -4,8 +4,6 @@ import re
 import logging
 import random
 import threading
-from concurrent.futures import ThreadPoolExecutor
-# typing 라이브러리는 사용하지 않음 (Python 3.13)
 from dataclasses import dataclass
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -122,6 +120,7 @@ def get_driver() -> webdriver.Chrome:
     logger.info("WebDriver 초기화 완료")
     return driver
 
+
 def wait_for_element_clickable(driver: webdriver.Chrome, selector: str, timeout: int = 5) -> bool:
     """요소가 클릭 가능할 때까지 효율적으로 대기합니다."""
     try:
@@ -129,6 +128,7 @@ def wait_for_element_clickable(driver: webdriver.Chrome, selector: str, timeout:
         return True
     except TimeoutException:
         return False
+
 
 def switch_to_entry_iframe(driver: webdriver.Chrome, wait: WebDriverWait) -> bool:
     try:
@@ -179,6 +179,7 @@ def click_tab(driver: webdriver.Chrome, wait: WebDriverWait, tab_name: str) -> b
     except Exception as e:
         logger.error(f"탭 클릭 중 오류 발생: {e}")
         return False
+
 
 def click_more_button_until_done(driver: webdriver.Chrome, selector: str, max_clicks: int = None) -> int:
     """더보기 버튼을 찾을 수 없을 때까지 계속 클릭합니다."""
@@ -245,6 +246,7 @@ def validate_menu_item(name: str, price: str) -> bool:
     
     return True
 
+
 def try_menu_selectors(driver: webdriver.Chrome, wait: WebDriverWait) -> tuple | None:
     """다양한 CSS 셀렉터를 시도하여 메뉴 항목을 찾습니다."""
     for item_selector in config.menu_item_selectors:
@@ -267,6 +269,7 @@ def try_menu_selectors(driver: webdriver.Chrome, wait: WebDriverWait) -> tuple |
         except TimeoutException:
             continue
     return None
+
 
 def try_price_based_extraction(driver: webdriver.Chrome) -> list[dict[str, str]]:
     """가격 기반으로 메뉴 항목을 추출합니다. (스타벅스 등 특수 구조용)"""
@@ -422,6 +425,7 @@ def scroll_until_no_new_content(driver: webdriver.Chrome, wait: WebDriverWait, i
     logger.info(f"{scroll_count}번 스크롤 후 종료.")
     return scroll_count
 
+
 def get_menu_data(driver: webdriver.Chrome, wait: WebDriverWait) -> list[dict[str, str]] | None:
     """메뉴 탭의 모든 메뉴명과 가격을 수집합니다."""
     if not click_tab(driver, wait, "메뉴"):
@@ -492,6 +496,7 @@ def get_menu_data(driver: webdriver.Chrome, wait: WebDriverWait) -> list[dict[st
 def validate_review_text(text: str) -> bool:
     """리뷰 텍스트의 유효성을 검증합니다."""
     return bool(text and text.strip() and len(text.strip()) > 5)
+
 
 def get_info_description(driver: webdriver.Chrome, wait: WebDriverWait) -> str | None:
     """정보 탭의 업체 소개를 수집합니다."""
@@ -613,6 +618,7 @@ def load_existing_crawled_data(output_dir: str) -> tuple[set, dict]:
     logger.info(f"검색 키워드 매핑 {len(search_keyword_to_place_id)}개를 로드했습니다.")
     return crawled_place_ids, search_keyword_to_place_id
 
+
 def load_failed_keywords(failed_keywords_file: str) -> set[str]:
     """실패한 검색어 목록을 로드합니다."""
     failed_keywords = set()
@@ -627,6 +633,7 @@ def load_failed_keywords(failed_keywords_file: str) -> set[str]:
     logger.info(f"실패한 검색어 {len(failed_keywords)}개를 로드했습니다.")
     return failed_keywords
 
+
 def save_failed_keyword(failed_keywords_file: str, keyword: str):
     """실패한 검색어를 파일에 기록합니다. (스레드 안전)"""
     with file_write_lock:
@@ -635,11 +642,13 @@ def save_failed_keyword(failed_keywords_file: str, keyword: str):
             f.write(keyword + '\n')
         logger.info(f"실패한 검색어 기록: {keyword}")
 
+
 def extract_place_id_from_url(url: str) -> str | None:
     """
 URL에서 업체 ID를 추출합니다."""
     match = re.search(r"/place/(\d+)", url)
     return match.group(1) if match else None
+
 
 def process_restaurant(driver: webdriver.Chrome, wait: WebDriverWait, restaurant_info: dict[str, any], crawled_place_ids: set, search_keyword_to_place_id: dict, failed_keywords: set) -> tuple[dict[str, any] | None, bool]:
     """개별 레스토랑 정보를 처리합니다."""
@@ -727,6 +736,7 @@ def process_restaurant(driver: webdriver.Chrome, wait: WebDriverWait, restaurant
         logger.info("=" * 80)
         return None, True  # 실패 상황으로 기록
 
+
 def get_current_part_file_path(output_dir: str) -> str:
     """현재 사용할 part 파일 경로를 반환합니다. (스레드 안전)"""
     with file_write_lock:
@@ -758,194 +768,8 @@ def get_current_part_file_path(output_dir: str) -> str:
         
         return os.path.join(output_dir, f"part-{max_part_num:05d}.jsonl")
 
-def process_batch_worker(batch_data: list[dict], worker_id: int, shared_state: dict) -> dict:
-    """개별 워커에서 배치 처리를 수행합니다."""
-    worker_logger = logging.getLogger(f"worker_{worker_id}")
-    worker_logger.info(f"워커 {worker_id} 시작: {len(batch_data)}개 아이템 처리")
-    
-    driver = get_driver()
-    wait = WebDriverWait(driver, config.default_wait_time)
-    
-    processed_count = 0
-    success_count = 0
-    failed_keywords = []
-    results = []
-    
-    try:
-        for restaurant_info in batch_data:
-            crawled_data, should_record_failure = process_restaurant(
-                driver, wait, restaurant_info, 
-                shared_state['crawled_place_ids'], 
-                shared_state['search_keyword_to_place_id'], 
-                shared_state['failed_keywords']
-            )
-            
-            processed_count += 1
-            
-            # 실패한 경우 기록
-            if should_record_failure and crawled_data is None:
-                title = restaurant_info.get("title", "")
-                title = title.replace("&amp;", " ")
-                road_address = restaurant_info.get("roadAddress", "")
-                if title and road_address:
-                    short_address = " ".join(road_address.split()[:3])
-                    search_keyword = f"{title} {short_address}"
-                    failed_keywords.append(search_keyword)
-            
-            if crawled_data:
-                results.append(crawled_data)
-                success_count += 1
-    
-    except Exception as e:
-        worker_logger.error(f"워커 {worker_id} 오류: {e}")
-    finally:
-        driver.quit()
-    
-    worker_logger.info(f"워커 {worker_id} 완료: {processed_count}개 처리, {success_count}개 성공")
-    return {
-        'worker_id': worker_id,
-        'processed_count': processed_count,
-        'success_count': success_count,
-        'results': results,
-        'failed_keywords': failed_keywords
-    }
-
-def save_batch_results(results: list[dict], output_dir: str) -> int:
-    """배치 결과를 파일에 저장합니다. (스레드 안전)"""
-    if not results:
-        return 0
-    
-    saved_count = 0
-    
-    # 전체 저장 과정을 락으로 보호
-    with file_write_lock:
-        try:
-            # 모든 결과를 한 번에 저장하여 파일 핸들 경쟁 상태 방지
-            current_file_record_count = 0
-            current_output_file = None
-            current_file_handle = None
-            
-            for result in results:
-                # 새 파일이 필요한지 확인
-                if current_file_handle is None or current_file_record_count >= MAX_RECORDS_PER_FILE:
-                    if current_file_handle:
-                        current_file_handle.close()
-                    
-                    current_output_file = get_current_part_file_path(output_dir)
-                    current_file_handle = open(current_output_file, 'a', encoding='utf-8')
-                    
-                    # 기존 파일의 레코드 수 다시 확인 (락 안에서)
-                    if os.path.exists(current_output_file):
-                        with open(current_output_file, 'r', encoding='utf-8') as temp_f:
-                            current_file_record_count = sum(1 for temp_line in temp_f if temp_line.strip())
-                    else:
-                        current_file_record_count = 0
-                    
-                    logger.info(f"새 출력 파일 사용: {current_output_file} (현재 레코드 수: {current_file_record_count})")
-                
-                # 데이터 쓰기
-                current_file_handle.write(json.dumps(result, ensure_ascii=False) + '\n')
-                current_file_handle.flush()  # 즉시 파일에 쓰기
-                current_file_record_count += 1
-                saved_count += 1
-                        
-            if current_file_handle:
-                current_file_handle.close()
-                
-        except Exception as e:
-            logger.error(f"배치 결과 저장 중 오류: {e}")
-            if 'current_file_handle' in locals() and current_file_handle:
-                current_file_handle.close()
-    
-    return saved_count
 
 def main():
-    """메인 크롤링 로직을 실행합니다 (병렬 처리 버전)."""
-    logger.info("크롤링 시작 (병렬 처리 모드)")
-    
-    crawled_place_ids, search_keyword_to_place_id = load_existing_crawled_data(OUTPUT_DIR)
-    failed_keywords = load_failed_keywords(FAILED_QUERIES_FILE)
-    
-    # 공유 상태
-    shared_state = {
-        'crawled_place_ids': crawled_place_ids,
-        'search_keyword_to_place_id': search_keyword_to_place_id,
-        'failed_keywords': failed_keywords
-    }
-    
-    try:
-        # INPUT_FILE을 읽고 랜덤으로 셔플
-        logger.info(f"INPUT_FILE 읽는 중: {INPUT_FILE}")
-        with open(INPUT_FILE, 'r', encoding='utf-8') as f_in:
-            lines = f_in.readlines()
-        
-        logger.info(f"총 {len(lines)}개 레스토랑 데이터 로드됨")
-        random.shuffle(lines)
-        logger.info("레스토랑 데이터를 랜덤으로 셔플했습니다")
-        
-        # 레스토랑 데이터를 배치로 분할
-        restaurant_data = []
-        for line in lines:
-            try:
-                restaurant_info = json.loads(line.strip())
-                restaurant_data.append(restaurant_info)
-            except json.JSONDecodeError as e:
-                logger.error(f"JSON 파싱 오류: {e}")
-                continue
-        
-        # 워커 수에 맞게 배치 분할
-        batch_size = max(1, len(restaurant_data) // (config.max_workers * 2))  # 워커당 2배치 정도
-        batches = [restaurant_data[i:i + batch_size] for i in range(0, len(restaurant_data), batch_size)]
-        
-        logger.info(f"{len(batches)}개 배치로 분할됨 (배치당 평균 {batch_size}개 아이템)")
-        logger.info(f"{config.max_workers}개 워커로 병렬 처리 시작")
-        
-        total_processed = 0
-        total_success = 0
-        all_failed_keywords = set(failed_keywords)
-        
-        # ThreadPoolExecutor 사용 (프로세스 풀보다 메모리 효율적)
-        with ThreadPoolExecutor(max_workers=config.max_workers) as executor:
-            # 배치를 워커에 분배
-            futures = []
-            for i, batch in enumerate(batches):
-                future = executor.submit(process_batch_worker, batch, i, shared_state)
-                futures.append(future)
-            
-            # 결과 수집 및 처리
-            for future in futures:
-                try:
-                    result = future.result(timeout=300)  # 5분 타임아웃
-                    total_processed += result['processed_count']
-                    total_success += result['success_count']
-                    
-                    # 실패한 키워드 업데이트
-                    for keyword in result['failed_keywords']:
-                        if keyword not in all_failed_keywords:
-                            save_failed_keyword(FAILED_QUERIES_FILE, keyword)
-                            all_failed_keywords.add(keyword)
-                    
-                    # 결과 저장
-                    if result['results']:
-                        saved_count = save_batch_results(result['results'], OUTPUT_DIR)
-                        logger.info(f"워커 {result['worker_id']} 결과 저장 완료: {saved_count}개")
-                        
-                        # 성공한 크롤링 데이터를 공유 상태에 업데이트
-                        for crawled_data in result['results']:
-                            place_id = crawled_data['place_id']
-                            search_keyword = crawled_data['search_keyword']
-                            shared_state['crawled_place_ids'].add(place_id)
-                            shared_state['search_keyword_to_place_id'][search_keyword] = place_id
-                    
-                except Exception as e:
-                    logger.error(f"워커 결과 처리 중 오류: {e}")
-        
-        logger.info(f"병렬 크롤링 완료: 총 {total_processed}개 처리, {total_success}개 성공")
-        
-    except Exception as e:
-        logger.error(f"메인 프로세스 오류: {e}")
-
-def main_sequential():
     """기존 순차 처리 방식 (백업용)."""
     logger.info("크롤링 시작 (순차 처리 모드)")
     
@@ -1032,9 +856,4 @@ def main_sequential():
         logger.info(f"크롤링 완료: 총 {processed_count}개 처리, {success_count}개 성공")
 
 if __name__ == "__main__":
-    # 환경변수로 실행 모드 선택 가능
-    import sys
-    if len(sys.argv) > 1 and sys.argv[1] == "--sequential":
-        main_sequential()
-    else:
-        main()  # 기본값: 병렬 처리
+    main() 
