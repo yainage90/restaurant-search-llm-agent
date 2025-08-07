@@ -317,7 +317,7 @@ def process_restaurant(raw_data: dict[str, Any]) -> dict[str, Any]:
     # 1. 전처리
     # 카테고리 클리닝
 
-    processed_category = convert_category(raw_data["category"])
+    # processed_category = convert_category(raw_data["category"])
 
     # 가격 변환
     processed_menus = []
@@ -342,7 +342,7 @@ def process_restaurant(raw_data: dict[str, Any]) -> dict[str, Any]:
     # 3. 요약 생성
     summary = create_summary(
         title=raw_data.get("title", ""),
-        category=processed_category,
+        category=raw_data.get("category"),
         address=raw_data.get("address", ""),
         road_address=raw_data.get("roadAddress", ""),
         menus=processed_menus,
@@ -360,7 +360,7 @@ def process_restaurant(raw_data: dict[str, Any]) -> dict[str, Any]:
     document = {
         "place_id": raw_data.get("place_id"),
         "title": raw_data.get("title"),
-        "category": processed_category,
+        "category": raw_data.get("category"),
         "address": raw_data.get("address"),
         "roadAddress": raw_data.get("roadAddress"),
         "coordinate": {
