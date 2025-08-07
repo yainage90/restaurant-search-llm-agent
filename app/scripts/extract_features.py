@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from google import genai
 # from openai import OpenAI
 from pydantic import BaseModel
-from app.retrieve.embeddings import get_document_embeddings
+from tqdm import tqdm
 
 
 load_dotenv()
@@ -353,9 +353,6 @@ def process_restaurant(raw_data: dict[str, Any]) -> dict[str, Any]:
         features=extracted_features.get("features")
     )
     
-    # 4. 임베딩 추출
-    embedding = get_document_embeddings(summary)[0]
-    
     # 6. 최종 문서 생성
     document = {
         "place_id": raw_data.get("place_id"),
@@ -376,7 +373,6 @@ def process_restaurant(raw_data: dict[str, Any]) -> dict[str, Any]:
         "occasion": extracted_features.get("occasion"),
         "features": extracted_features.get("features"),
         "summary": summary,
-        "embedding": embedding,
     }
     
     return document
@@ -415,7 +411,7 @@ def print_test():
 def main():
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     INPUT_DIR = os.path.join(BASE_DIR, "../../data/crawled_restaurants")
-    OUTPUT_DIR = os.path.join(BASE_DIR, "../../data/documents")
+    OUTPUT_DIR = os.path.join(BASE_DIR, "../../data/featured_restaurants")
     
     # 출력 디렉토리 생성
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -424,11 +420,19 @@ def main():
     input_files = [f for f in os.listdir(INPUT_DIR) if f.startswith("part-") and f.endswith(".jsonl")]
     input_files.sort()  # 파일명 순서로 정렬
     
-    for input_filename in input_files:
+    print(f"📁 총 {len(input_files)}개 파일 처리 시작\n")
+    
+    for file_idx, input_filename in enumerate(input_files, 1):
         input_file_path = os.path.join(INPUT_DIR, input_filename)
         output_file_path = os.path.join(OUTPUT_DIR, input_filename)
         
-        print(f"Processing {input_filename}...")
+        print(f"📄 [{file_idx}/{len(input_files)}] {input_filename}")
+        
+        # 전체 레코드 수 계산
+        total_records = 0
+        with open(input_file_path, "r", encoding="utf-8") as f_in:
+            for _ in f_in:
+                total_records += 1
         
         # 이미 처리된 place_id들 확인
         processed_place_ids = set()
@@ -438,9 +442,28 @@ def main():
                     document = json.loads(line)
                     processed_place_ids.add(document["place_id"])
         
+        processed_count = len(processed_place_ids)
+        remaining_count = total_records - processed_count
+        
+        print(f"전체: {total_records}개 | 완료: {processed_count}개 | 남은작업: {remaining_count}개")
+        
+        if remaining_count == 0:
+            print("✅ 이미 모든 데이터 처리 완료\n")
+            continue
+        
         # 파일 처리
+        failed_count = 0
+        
         with open(output_file_path, "a", encoding="utf-8") as f_out:
             with open(input_file_path, "r", encoding="utf-8") as f_in:
+                progress_bar = tqdm(
+                    total=remaining_count,
+                    desc="처리중",
+                    unit="개",
+                    ncols=80,
+                    bar_format="{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]"
+                )
+                
                 for line in f_in:
                     raw_data = json.loads(line)
                     if raw_data["place_id"] in processed_place_ids:
@@ -448,11 +471,18 @@ def main():
 
                     document = process_restaurant(raw_data)
                     if not document:
+                        failed_count += 1
+                        progress_bar.set_postfix({"실패": failed_count})
+                        progress_bar.update(1)
                         continue
 
                     f_out.write(f"{json.dumps(document, ensure_ascii=False)}\n")
+                    progress_bar.set_postfix({"실패": failed_count})
+                    progress_bar.update(1)
+                
+                progress_bar.close()
         
-        print(f"Completed {input_filename}")
+        print(f"✅ 완료 - 실패: {failed_count}개\n")
 
 
 if __name__ == "__main__":

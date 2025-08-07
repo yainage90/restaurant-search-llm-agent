@@ -241,5 +241,5 @@ def load_and_index_from_json(
 if __name__ == "__main__":
     # 사용 예시
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    documents_dir = f"{BASE_DIR}/../../data/documents" 
+    documents_dir = f"{BASE_DIR}/../../data/documents_with_embeddings" 
     load_and_index_from_json(documents_dir)
