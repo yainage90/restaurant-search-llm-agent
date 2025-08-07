@@ -15,4 +15,5 @@ dependencies = [
     "elasticsearch>=9.1.0",
     "tavily-python>=0.7.10",
     "gradio>=5.39.0",
+    "tqdm>=4.67.1",
 ]

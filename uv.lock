@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.13"
 
 [[package]]
@@ -908,6 +908,7 @@ dependencies = [
     { name = "requests" },
     { name = "selenium" },
     { name = "tavily-python" },
+    { name = "tqdm" },
     { name = "webdriver-manager" },
 ]
 
@@ -922,6 +923,7 @@ requires-dist = [
     { name = "requests", specifier = ">=2.32.4" },
     { name = "selenium", specifier = ">=4.34.2" },
     { name = "tavily-python", specifier = ">=0.7.10" },
+    { name = "tqdm", specifier = ">=4.67.1" },
     { name = "webdriver-manager", specifier = ">=4.0.1" },
 ]
 
