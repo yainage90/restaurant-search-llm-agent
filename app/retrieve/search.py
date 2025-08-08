@@ -5,13 +5,12 @@
 import os
 import requests
 from typing import Any
-from elasticsearch import Elasticsearch
 from dotenv import load_dotenv
-import copy
 
 from .query_rewrite import rewrite_query
 from .embeddings import get_query_embedding
 from .relevance import grade_relevance
+from .elasticsearch import build_elasticsearch_query, search_elasticsearch
 from tavily import TavilyClient
 
 
@@ -19,17 +18,6 @@ load_dotenv()
 
 travily_client = TavilyClient()
 
-def create_elasticsearch_client() -> Elasticsearch:
-    """Elasticsearch 클라이언트 생성"""
-    host = os.environ.get("ELASTICSEARCH_HOST")
-    username = os.environ.get("ELASTICSEARCH_USERNAME")
-    password = os.environ.get("ELASTICSEARCH_PASSWORD")
-
-    return Elasticsearch(
-        [f"http://{host}"],
-        basic_auth=(username, password),
-        verify_certs=False
-    )
 
 
 def search_naver_poi(query: str) -> dict[str, float] | None:
@@ -72,132 +60,6 @@ def search_naver_poi(query: str) -> dict[str, float] | None:
     return None
 
 
-def build_elasticsearch_query(
-    structured_query: dict[str, Any], 
-    query_embedding: list[float]
-) -> dict[str, Any]:
-    """구조화된 쿼리를 바탕으로 Elasticsearch 쿼리 생성"""
-    
-    es_query = {
-        "size": 3,
-        "_source": {
-            "includes": ["place_id", "summary"],
-        },
-        "knn": {
-            "field": "embedding",
-            "query_vector": query_embedding,
-            "k": 5,
-            "num_candidates": 100,
-            "filter": [],
-        }
-    }
-    
-    # location 처리
-    if "location" in structured_query:
-        for location in structured_query["location"]:
-            if location["relation"] == "exact":
-                # 특정 식당명으로 검색
-                es_query["knn"]["filter"].append({
-                    "match": {
-                        "title": {
-                            "query": location["name"],
-                        }
-                    }
-                })
-            elif location["relation"] == "nearby":
-                # 위치 기반 검색
-                # poi_location = search_naver_poi(location["name"])
-                # if poi_location:
-                #     es_query["knn"]["filter"].append({
-                #         "geo_distance": {
-                #             "distance": "3km",
-                #             "pin.coordinate": {
-                #                 "lat": poi_location["lat"],
-                #                 "lon": poi_location["lon"]
-                #             }
-                #         }
-                #     })
-                pass
-    
-    # convenience 필터링 (필수 조건)
-    if conveniences := structured_query.get("convenience"):
-        conveniences_text = ",".join(conveniences)
-        es_query["knn"]["filter"].append({
-            "match": {
-                "convenience": {
-                    "query": conveniences_text,
-                    "operator": "and",
-                }
-            }
-        })
-    
-    # category, menu 필터링 (음식 관련)
-    if category := structured_query.get("category"):
-        es_query["knn"]["filter"].append(
-            {
-                "bool": {
-                    "should": [
-                        {
-                            "match": {
-                                "category": {
-                                    "query": category,
-                                    "operator": "and"
-                                },
-                            }
-                        },
-                        {
-                            "nested": {
-                                "path": "menus",
-                                "query": {
-                                    "match": {
-                                        "menus.name": {
-                                            "query": category,
-                                            "operator": "and",
-                                        }
-                                    }
-                                },
-                            },
-                        }
-                    ],
-                    "minimum_should_match": 1,
-                }
-            }
-        )
-    
-    if menus := structured_query.get("menu"):
-        menus_text = ",".join(menus)
-        es_query["knn"]["filter"].append(
-            {
-                "bool": {
-                    "should": [
-                        {
-                            "nested": {
-                                "path": "menus",
-                                "query": {
-                                    "match": {
-                                        "menus.name": {
-                                            "query": menus_text,
-                                            "operator": "or",
-                                        },
-                                    },
-                                },
-                            },
-                        },
-                        {
-                            "match": {
-                                "review_food": {
-                                    "query": menus_text,
-                                    "operator": "or",
-                                },
-                            },
-                        },
-                    ],
-                    "minimum_should_match": 1,
-                }
-            }
-        )
-
-    return es_query
 
 
 def search_restaurants(query: str, index_name: str = "restaurants") -> list[dict[str, Any]]:
@@ -207,7 +69,7 @@ def search_restaurants(query: str, index_name: str = "restaurants") -> list[dict
     Args:
         query: 사용자의 자연어 쿼리
         index_name: Elasticsearch 인덱스명
-        
+
     Returns:
         검색된 식당 문서 리스트
     """
@@ -227,51 +89,38 @@ def search_restaurants(query: str, index_name: str = "restaurants") -> list[dict
     # print(f"Elasticsearch 쿼리: {json.dumps(display_es_query, indent=2, ensure_ascii=False)}")
     
     # 4. 검색 실행
-    es = create_elasticsearch_client()
-    try:
-        response = es.search(index=index_name, body=es_query)
+    results = search_elasticsearch(es_query, index_name)
+    print(f"검색 완료: {len(results)}개 문서 발견")
+    
+    # 5. 연관도 판단 및 문서 필터링
+    if results:
+        relevance_result = grade_relevance(query, results)
+        print(f"연관도 평가: {relevance_result['overall_relevance']}")
+        print(f"평가 근거: {relevance_result['reason']}")
         
-        results = []
-        for hit in response["hits"]["hits"]:
-            doc = hit["_source"]
-            doc["_score"] = hit["_score"]
-            results.append(doc)
-        
-        print(f"검색 완료: {len(results)}개 문서 발견")
-
-        # 5. 연관도 판단 및 문서 필터링
-        if results:
-            relevance_result = grade_relevance(query, results)
-            print(f"연관도 평가: {relevance_result['overall_relevance']}")
-            print(f"평가 근거: {relevance_result['reason']}")
+        # relevant 문서만 필터링
+        if relevance_result['overall_relevance'] == 'relevant':
+            filtered_results = []
+            document_scores = relevance_result.get('document_scores', [])
             
-            # relevant 문서만 필터링
-            if relevance_result['overall_relevance'] == 'relevant':
-                filtered_results = []
-                document_scores = relevance_result.get('document_scores', [])
+            for i, doc in enumerate(results):
+                # document_scores에서 해당 문서의 relevance 확인
+                doc_relevance = 'relevant'  # 기본값
+                for score in document_scores:
+                    if str(score.get('document_id')) == str(i + 1):
+                        doc_relevance = score.get('relevance', 'relevant')
+                        break
                 
-                for i, doc in enumerate(results):
-                    # document_scores에서 해당 문서의 relevance 확인
-                    doc_relevance = 'relevant'  # 기본값
-                    for score in document_scores:
-                        if str(score.get('document_id')) == str(i + 1):
-                            doc_relevance = score.get('relevance', 'relevant')
-                            break
-                    
-                    if doc_relevance == 'relevant':
-                        filtered_results.append(doc)
-                
-                print(f"필터링 후: {len(filtered_results)}개 문서\n")
-                return filtered_results
-            else:
-                print("전체적으로 관련성이 낮은 것으로 판단되어 빈 결과를 반환합니다.")
-                return []
+                if doc_relevance == 'relevant':
+                    filtered_results.append(doc)
+            
+            print(f"필터링 후: {len(filtered_results)}개 문서\n")
+            return filtered_results
+        else:
+            print("전체적으로 관련성이 낮은 것으로 판단되어 빈 결과를 반환합니다.")
+            return []
 
-        return results
-        
-    except Exception as e:
-        print(f"Elasticsearch 검색 오류: {e}")
-        return []
+    return results
 
 
 def search_web(query: str):
