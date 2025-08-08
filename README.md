@@ -137,9 +137,13 @@ flowchart TD
   - `location`: 위치 정보
     - `name`: 지역명(강남역, 정자동, 타임스퀘어)
     - `relation`: 관련성 (exact: 특정 식당명, nearby: 근처)
-  - `cuisine`: 요리(예: 한식, 일식, 중식, 양식, 퓨전요리)
-  - `menu`: 메뉴명(예: 국밥, 치킨, 회, 돈가스, 파스타)
-  - `convenience`: 편의(예: 주차, 배달, 포장, 예약, 룸, 반려동물, 고기구워주는)
+  - `category`: 카테고리(예: 한식, 일식, 중식, 양식, 퓨전요리)
+  - `menu`
+    - `value`: 메뉴명(예: 국밥, 치킨, 회, 돈가스, 파스타)
+    - `need_filter`: 필터링 필요 여부(1|0)
+  - `convenience`
+    - `value`: 편의(예: 주차, 배달, 포장, 예약, 룸, 반려동물, 고기구워주는)
+    - `need_filter`: 필터링 필요 여부(1|0)
   - `atmosphere`: 분위기(예: 이국적인, 색다른, 로맨틱한)
   - `occasion`: 상황(예: 회식, 단체, 데이트, 혼밥, 가족)
 
@@ -148,8 +152,8 @@ flowchart TD
 ```json
 {
   "location": [{ "name": "강남역", "relation": "nearby" }],
-  "cuisine": ["일식"],
-  "convenience": ["주차"]
+  "category": ["일식"],
+  "convenience": [{ "value": "주차", "need_filter": 1 }]
 }
 ```
 
@@ -158,7 +162,7 @@ flowchart TD
 ```json
 {
   "location": [{ "name": "판교", "relation": "nearby" }],
-  "convenience": ["반려동물"]
+  "convenience": [{ "value": "반려동물", "need_filter": 1 }]
 }
 ```
 
@@ -170,7 +174,7 @@ flowchart TD
     { "name": "마포", "relation": "nearby" },
     { "name": "진대감", "relation": "exact" }
   ],
-  "convenience": ["주차"]
+  "convenience": [{ "value": "주차", "need_filter": 0 }]
 }
 ```
 
@@ -178,7 +182,7 @@ flowchart TD
 
 ```json
 {
-  "menu": ["맥주"],
+  "menu": [{ "value": "맥주", "need_filter": 0 }],
   "atmosphere": ["조용한"]
 }
 ```
@@ -188,12 +192,12 @@ flowchart TD
 ```json
 {
   "location": [{ "name": "홍대", "relation": "nearby" }],
-  "menu": ["삼겹살"],
+  "menu": [{ "value": "삼겹살", "need_filter": 0 }],
   "occasion": ["회식"]
 }
 ```
 
-구조화된 쿼리에서 `location`, `cuisine`, `menu`, `convenience`는 필수로 충족되어야 하는 성질의 조건이므로 필터링을 수행하는 용도로 사용하고, `atmosphere`, `occasion`은 점수 부스팅 용도로 사용함. 이러한 키워드 검색에 더불어 벡터 검색을 수행한다.
+구조화된 쿼리에서 `location`, `category`, `menu`, `convenience`는 필수로 충족되어야 하는 성질의 조건이므로 필터링을 수행하는 용도로 사용하고, `atmosphere`, `occasion`은 점수 부스팅 용도로 사용함. 이러한 키워드 검색에 더불어 벡터 검색을 수행한다.
 
 <br>
 
@@ -218,7 +222,7 @@ flowchart TD
 
 LLM을 사용해서 리뷰(`reviews`)와 식당 설명(`description`)에서 다음의 추가적인 정보를 추출한다.
 
-- `review_food`: 리뷰에서 추출한 요리, 음식 관련 키워드. 크롤링한 식당 필드에도 `cuisine`, `menu`가 이미 있지만 리뷰에서 더 풍부한 키워드 추출.
+- `review_food`: 리뷰에서 추출한 요리, 음식 관련 키워드. 크롤링한 식당 필드에도 `menu`가 이미 있지만 리뷰에서 더 풍부한 키워드 추출.
 - `convenience`: 편의(예: 주차, 배달, 포장, 예약, 룸, 반려동물, 고기구워줌 등)
 - `atmosphere`: 분위기(예: 이국적인, 색다른, 로맨틱한 등)
 - `occasion`: 상황(예: 회식, 단체, 데이트, 혼밥, 가족 등)
@@ -343,7 +347,7 @@ f"기타 특징: {','.join(features) if features else None}"
   - `location.relation`이 `exact`일 경우 문서의 `title` 대상으로 검색한다. 검색결과가 있을 경우 해당 식당 정보를 가져온다. 이렇게 되면 검색은 여기서 끝나고 유저의 자연어 질의어와 업체 정보를 컨텍스트로 묶어 LLM에 답변 요청을 생성한다.
   - `location.relation`이 `nearby`일 경우 네이버 검색 API를 활용해 해당 POI(Point Of Interest)를 검색한다. 예를들어 검색어가 '정자역'인 경우 네이버 검색 API에서 받아온 정자역의 위도, 경도를 중심으로 반경을 제한하는 geo 쿼리를 구조화된 쿼리에 추가하여 필터링을 수행한다.
 
-- query: `cuisine` -> document: `category`, `review_food`
+- query: `category` -> document: `category`,
 
 - query: `menu` -> document: `menus.name`, `review_food`
 
@@ -364,7 +368,7 @@ f"기타 특징: {','.join(features) if features else None}"
 {
   "location": [{ "name": "강남역", "relation": "nearby" }],
   "convenience": ["주차"],
-  "cuisine": ["일식"]
+  "category": ["일식"]
 }
 ```
 
@@ -397,26 +401,11 @@ f"기타 특징: {','.join(features) if features else None}"
                 }
             },
             {
-                "bool": {
-                    "should": [
-                        {
-                            "category": {
-                                "match": {
-                                    "query": "일식",
-                                    "operator": "and",
-                                }
-                            }
-                        },
-                        {
-                            "review_food": {
-                                "match": {
-                                    "query": "일식",
-                                    "operator": "and",
-                                }
-                            }
-                        }
-                    ],
-                    "minimum_should_match": 1
+                "category": {
+                    "match": {
+                        "query": "일식",
+                        "operator": "and",
+                    }
                 }
             }
         ]
