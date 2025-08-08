@@ -131,8 +131,8 @@ def build_elasticsearch_query(
             }
         })
     
-    # cuisine, menu 필터링 (음식 관련)
-    if cuisine := structured_query.get("cuisine"):
+    # category, menu 필터링 (음식 관련)
+    if category := structured_query.get("category"):
         es_query["knn"]["filter"].append(
             {
                 "bool": {
@@ -140,7 +140,7 @@ def build_elasticsearch_query(
                         {
                             "match": {
                                 "category": {
-                                    "query": cuisine,
+                                    "query": category,
                                     "operator": "and"
                                 },
                             }
@@ -151,18 +151,10 @@ def build_elasticsearch_query(
                                 "query": {
                                     "match": {
                                         "menus.name": {
-                                            "query": cuisine,
+                                            "query": category,
                                             "operator": "and",
                                         }
                                     }
-                                },
-                            },
-                        },
-                        {
-                            "match": {
-                                "review_food": {
-                                    "query": cuisine,
-                                    "operator": "and",
                                 },
                             },
                         }
