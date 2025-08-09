@@ -72,7 +72,7 @@ def build_elasticsearch_query(
     
     # convenience 필터링 (필수 조건)
     if conveniences := structured_query.get("convenience"):
-        conveniences_text = ",".join(conveniences)
+        conveniences_text = ",".join([convenience["value"] for convenience in conveniences if convenience["need_filter"] == 1])
         es_query["knn"]["filter"].append({
             "match": {
                 "convenience": {
@@ -96,7 +96,7 @@ def build_elasticsearch_query(
         )
     
     if menus := structured_query.get("menu"):
-        menus_text = ",".join(menus)
+        menus_text = ",".join([menu["value"] for menu in menus if menu["need_filter"] == 1])
         es_query["knn"]["filter"].append(
             {
                 "bool": {
