@@ -72,9 +72,9 @@ def should_perform_new_search(
         chat_history_text = "최근 대화:\n"
         recent_chat = chat_history[-config.max_chat_history:]
         for user_msg, bot_msg in recent_chat:
-            truncated_bot_msg = bot_msg[:100] + "..." if len(bot_msg) > 100 else bot_msg
+            # truncated_bot_msg = bot_msg[:500] + "..." if len(bot_msg) > 500 else bot_msg
             chat_history_text += f"사용자: {user_msg}\n"
-            chat_history_text += f"어시스턴트: {truncated_bot_msg}\n"
+            chat_history_text += f"어시스턴트: {bot_msg}\n"
     
     prompt = f"""사용자의 현재 메시지를 분석하여 새로운 맛집 검색이 필요한지 판단해주세요.
 
