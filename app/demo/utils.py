@@ -6,7 +6,12 @@ import json
 import re
 from functools import wraps
 from typing import Any, Callable
+from google import genai
 from .config import ui_messages
+
+
+# Gemini 클라이언트 초기화
+client = genai.Client()
 
 
 def handle_exceptions(
@@ -150,3 +155,35 @@ def create_session_id(identifier: str) -> str:
         str: 생성된 세션 ID
     """
     return f"user_{hash(str(identifier))}"
+
+
+def generate_decision(prompt: str) -> str:
+    """
+    검색 필요성 판단 등 간단한 의사결정을 위한 경량화된 생성 함수
+    
+    Args:
+        prompt: 판단을 위한 프롬프트
+        
+    Returns:
+        LLM이 생성한 응답 텍스트
+        
+    Raises:
+        Exception: LLM 호출 중 오류가 발생한 경우
+    """
+    
+    # 간단한 의사결정용 시스템 프롬프트
+    decision_system_prompt = """당신은 사용자의 요청을 분석하여 명확하고 정확한 판단을 내리는 AI입니다.
+주어진 지침에 따라 정확한 JSON 형태로 응답해주세요."""
+    
+    # LLM에 요청
+    response = client.models.generate_content(
+        model="gemini-2.5-flash-lite",
+        contents=prompt,
+        config=genai.types.GenerateContentConfig(
+            temperature=0.0,
+            system_instruction=decision_system_prompt,
+            max_output_tokens=512,
+        )
+    )
+    
+    return response.text

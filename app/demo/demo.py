@@ -3,7 +3,6 @@
 사용자용 채팅 인터페이스와 어드민 대시보드를 하나로 통합한 Gradio 앱
 """
 
-import json
 import gradio as gr
 from dotenv import load_dotenv
 from typing import Optional
@@ -20,7 +19,8 @@ from .utils import (
     parse_json_response, 
     safe_format_json, 
     calculate_keyword_similarity,
-    create_session_id
+    create_session_id,
+    generate_decision
 )
 from .ui_components import (
     create_chat_interface,
@@ -86,13 +86,12 @@ def should_perform_new_search(
 
 다음과 같은 경우 새로운 검색이 필요합니다:
 1. 완전히 다른 지역이나 음식 종류를 요청하는 경우
-2. 새로운 조건(가격대, 분위기, 특별한 요구사항)을 추가한 경우  
-3. 기존 검색 결과에 만족하지 못하고 다른 옵션을 원하는 경우
-4. 구체적인 맛집 정보를 요청하는 새로운 질문인 경우
+2. 기존 검색 결과에 만족하지 못하고 다른 옵션을 원하는 경우
+3. 이전 검색과 전혀 관련 없는 새로운 맛집 정보를 요청하는 경우
 
 다음과 같은 경우는 기존 검색 결과로 답변 가능합니다:
-1. 기존 검색 결과에 대한 추가 질문 (영업시간, 메뉴, 가격 등)
-2. 기존 추천 맛집 중 선택이나 비교를 요청하는 경우
+1. 기존 검색 결과에 포함된 특정 식당에 대한 추가 질문 (메뉴, 영업시간, 가격, 위치, 예약 방법 등)
+2. 기존 추천 맛집 중 선택이나 비교를 요청하는 경우  
 3. 일반적인 대화나 감사 인사
 4. 기존 검색 결과 내에서 답변할 수 있는 질문
 
@@ -103,7 +102,7 @@ def should_perform_new_search(
     "suggested_query": "새로운 검색이 필요한 경우 권장 검색 쿼리, 아니면 빈 문자열"
 }}"""
 
-    response = generate(query="", context=prompt)
+    response = generate_decision(prompt)
     parsed_result = parse_json_response(response)
     
     if "error" in parsed_result:
@@ -176,25 +175,32 @@ def chat_fn(
     session_manager.cleanup_old_sessions()
 
     if not history or not session.has_context():
-        # 첫 대화: 새로운 검색 수행
-        return _perform_first_search(message, session)
+        # 첫 대화: 검색 필요성 판단 후 처리
+        return _handle_first_chat(message, session)
     else:
         # 후속 대화: 스마트 검색 로직 적용
         return _handle_follow_up_chat(message, history, session)
 
 
-def _perform_first_search(message: str, session) -> str:
-    """첫 번째 검색 수행"""
-    try:
-        restaurant_context = search(message)
-        session.update_context(message, restaurant_context)
-        
-        bot_response = generate(message, restaurant_context)
-        print(f'[Session {session.session_id}] 첫 검색 - Query: {message}')
-        return bot_response
-    except Exception as e:
-        print(f'[Session {session.session_id}] 검색 오류: {e}')
-        return f"{ui_messages.error_prefix}{str(e)}"
+def _handle_first_chat(message: str, session) -> str:
+    """첫 번째 대화 처리 - 검색 필요성 판단"""
+    # 빈 기록으로 검색 필요성 판단
+    search_decision = should_perform_new_search(message, [], [])
+    print(f'[Session {session.session_id}] 첫 대화 검색 필요성 판단: {search_decision}')
+    
+    if search_decision["need_search"]:
+        # 검색이 필요한 경우
+        suggested_query = search_decision["suggested_query"] or message
+        return _perform_new_search(suggested_query, session)
+    else:
+        # 검색이 불필요한 경우 - 일반적인 응답 생성
+        try:
+            bot_response = generate(query="", context=f"사용자 메시지: {message}")
+            print(f'[Session {session.session_id}] 첫 대화 - 검색 없이 응답')
+            return bot_response
+        except Exception as e:
+            print(f'[Session {session.session_id}] 응답 생성 오류: {e}')
+            return f"{ui_messages.error_prefix}{str(e)}"
 
 
 def _handle_follow_up_chat(message: str, history: list[list[str]], session) -> str:
