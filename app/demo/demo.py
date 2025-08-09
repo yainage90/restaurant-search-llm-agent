@@ -7,8 +7,9 @@ import json
 import gradio as gr
 from dotenv import load_dotenv
 from typing import Iterator
-from ..retrieve.search import search, search_restaurants, build_elasticsearch_query, create_elasticsearch_client
-from ..generation.generation import generate, generate_streaming
+from ..retrieve.elasticsearch import create_elasticsearch_client, build_elasticsearch_query
+from ..retrieve.search import search, search_restaurants
+from ..generation.generation import generate
 from ..retrieve.query_rewrite import rewrite_query
 from ..retrieve.embeddings import get_query_embedding
 from ..retrieve.relevance import grade_relevance
