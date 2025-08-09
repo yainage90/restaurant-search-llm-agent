@@ -87,7 +87,7 @@ class StructuredQuery(BaseModel):
     occasion: list 
 
 
-def rewrite_query(query: str) -> dict:
+def structure_query(query: str) -> dict:
     """LLM을 사용한 쿼리 재작성"""
     user_prompt = USER_QUERY_PROMPT.format(query=query)
     
@@ -108,7 +108,7 @@ def rewrite_query(query: str) -> dict:
     return structured_query
 
 
-def test_query_rewrite():
+def test_structure_query():
     """README.md의 예시를 사용한 테스트 함수"""
     test_cases = [
         {
@@ -154,7 +154,7 @@ def test_query_rewrite():
     for i, test_case in enumerate(test_cases, 1):
         query = test_case["query"]
         expected = test_case["expected"]
-        result = rewrite_query(query)
+        result = structure_query(query)
         
         print(f"\n{i}. 테스트 쿼리: '{query}'")
         print(f"   예상 결과: {expected}")
@@ -162,4 +162,4 @@ def test_query_rewrite():
         print(f"   매칭 여부: {'✓' if result == expected else '✗'}")
 
 if __name__ == "__main__":
-    test_query_rewrite()
+    test_structure_query()

@@ -7,7 +7,7 @@ import requests
 from typing import Any
 from dotenv import load_dotenv
 
-from .query_rewrite import rewrite_query
+from .structure_query import structure_query
 from .embeddings import get_query_embedding
 from .relevance import grade_relevance
 from .elasticsearch import build_elasticsearch_query, search_elasticsearch
@@ -75,7 +75,7 @@ def search_restaurants(query: str, index_name: str = "restaurants") -> list[dict
     """
     
     # 1. 쿼리 재구조화
-    structured_query = rewrite_query(query)
+    structured_query = structure_query(query)
     print(f"구조화된 쿼리: {structured_query}")
     
     # 2. 쿼리 임베딩 생성

@@ -82,7 +82,7 @@ flowchart TD
     A([START]) --> B[쿼리 인입
     Query Input];
     B --> C[쿼리 구조화
-    Query Rewrite];
+    Structure Query];
     C --> D[검색
     Retrieve];
     D --> F{문서 적합도 평가
@@ -101,7 +101,7 @@ flowchart TD
 
 사용자가 입력한 질의가 시스템 입력으로 인입. 어떠한 가공도 되지 않은 자연어 형태로, 기계가 이해하기 쉬운 형태로 변형이 필요한 텍스트이다.
 
-### 2. 쿼리 구조화(Query Rewrite)
+### 2. 쿼리 구조화(Structure Query)
 
 검색시 입력한 자연어 쿼리를 검색에 용이한 형태로 구조화하는 단계. 여러가지 NLU(Natural Language Understanding - 자연어 이해) 기술 적용이 필요하다.
 
@@ -129,7 +129,7 @@ flowchart TD
 
 <br>
 
-# 4. 쿼리 구조화(Query Rewrite)
+# 4. 쿼리 구조화(Structure Query)
 
 검색시 입력한 자연어 쿼리에서 핵심 정보를 추출해 검색에 적합한 구조화된 쿼리(Structured Query)로 변경하는 단계이다.
 

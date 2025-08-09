@@ -9,7 +9,7 @@ from typing import Optional
 from ..retrieve.elasticsearch import create_elasticsearch_client, build_elasticsearch_query
 from ..retrieve.search import search, search_restaurants
 from ..generation.generation import generate
-from ..retrieve.query_rewrite import rewrite_query
+from ..retrieve.structure_query import structure_query
 from ..retrieve.embeddings import get_query_embedding
 from ..retrieve.relevance import grade_relevance
 from .config import config, ui_messages
@@ -261,9 +261,9 @@ def _generate_context_response(message: str, history: list[list[str]], session) 
 
 
 @handle_exceptions(default_return="")
-def test_query_rewrite(query: str) -> str:
+def test_structure_query(query: str) -> str:
     """쿼리 재작성 모듈 테스트"""
-    result = rewrite_query(query)
+    result = structure_query(query)
     return safe_format_json(result)
 
 
@@ -271,7 +271,7 @@ def test_query_rewrite(query: str) -> str:
 def test_search_module(query: str) -> tuple[str, str, str]:
     """검색 모듈 전체 파이프라인 테스트"""
     # 1. 쿼리 재작성
-    structured_query = rewrite_query(query)
+    structured_query = structure_query(query)
     
     # 2. 임베딩 생성
     query_embedding = get_query_embedding([query])
@@ -439,7 +439,7 @@ def create_interface() -> gr.Blocks:
             # 어드민 대시보드
             with gr.Tab("🔧 어드민 대시보드"):
                 create_admin_dashboard(
-                    test_query_rewrite,
+                    test_structure_query,
                     test_search_module,
                     get_relevance_evaluation,
                     get_search_results_summary

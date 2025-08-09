@@ -73,30 +73,30 @@ def create_chat_interface(chat_fn: Callable) -> tuple[Any, Any, Any]:
     return chat_interface, session_info, search_history_info
 
 
-def create_query_rewrite_tab(test_fn: Callable) -> None:
-    """쿼리 재작성 테스트 탭 생성"""
+def create_structure_query_tab(test_fn: Callable) -> None:
+    """쿼리 구조화 테스트 탭 생성"""
     gr.Markdown("### 자연어 쿼리를 구조화된 JSON으로 변환하는 모듈을 테스트합니다.")
     
     with gr.Row():
         with gr.Column():
             query_input = gr.Textbox(
                 label="테스트 쿼리",
-                placeholder=f"예: {ui_messages.test_query_rewrite}",
-                value=ui_messages.test_query_rewrite
+                placeholder=f"예: {ui_messages.test_structure_query}",
+                value=ui_messages.test_structure_query
             )
-            rewrite_btn = gr.Button("쿼리 재작성 테스트", variant="primary")
+            structure_btn = gr.Button("쿼리 구조화 테스트", variant="primary")
         
         with gr.Column():
-            rewrite_output = gr.Code(
+            structure_output = gr.Code(
                 label="구조화된 쿼리 결과",
                 language="json",
                 lines=15
             )
     
-    rewrite_btn.click(
+    structure_btn.click(
         fn=test_fn,
         inputs=[query_input],
-        outputs=[rewrite_output]
+        outputs=[structure_output]
     )
 
 
@@ -181,7 +181,7 @@ def create_relevance_test_tab(
 
 
 def create_admin_dashboard(
-    test_query_rewrite_fn: Callable,
+    test_structure_query_fn: Callable,
     test_search_module_fn: Callable,
     get_relevance_evaluation_fn: Callable,
     get_search_results_summary_fn: Callable
@@ -192,7 +192,7 @@ def create_admin_dashboard(
     with gr.Tabs():
         # 쿼리 재작성 모듈 테스트
         with gr.Tab("🔄 쿼리 재작성"):
-            create_query_rewrite_tab(test_query_rewrite_fn)
+            create_structure_query_tab(test_structure_query_fn)
         
         # 검색 모듈 테스트
         with gr.Tab("🔍 검색"):
