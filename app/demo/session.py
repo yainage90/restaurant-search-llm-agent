@@ -3,7 +3,6 @@
 """
 
 from datetime import datetime
-from typing import Optional
 from .config import config
 
 
@@ -12,7 +11,7 @@ class ConversationSession:
     
     def __init__(self, session_id: str = None):
         self.session_id = session_id or f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        self.context: Optional[str] = None  # 검색된 레스토랑 정보
+        self.context: str | None = None  # 검색된 레스토랑 정보
         self.search_history: list[dict] = []  # 검색 기록
         self.created_at = datetime.now()
         self.last_activity = datetime.now()
@@ -73,7 +72,7 @@ class SessionManager:
         self.sessions[session.session_id] = session
         return session
     
-    def get_session(self, session_id: str) -> Optional[ConversationSession]:
+    def get_session(self, session_id: str) -> ConversationSession | None:
         """특정 세션 가져오기"""
         return self.sessions.get(session_id)
     
