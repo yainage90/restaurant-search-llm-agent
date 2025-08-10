@@ -32,7 +32,7 @@ EXTRACT_FEATURES_PROMPT = """
 **중요: 반드시 유효한 JSON 형식으로만 응답하세요. 추가적인 설명이나 마크다운은 포함하지 마세요.**
 
 **추출 가이드라인:**
-- 각 항목에 대해 5개 이하의 핵심 키워드를 추출합니다.
+- 각 항목에 대해 10개 이하의 핵심 키워드를 추출합니다.
 - 여러 리뷰에서 공통적으로 언급되는 내용을 우선적으로 고려합니다.
 - '인생'이 들어가는 키워드는 추출하지 마세요.
 - 절대로 같은 키워드를 중복해서 생성하지 마세요.
@@ -143,7 +143,6 @@ def extract_features_with_gemini(place_id: str, reviews: list[str], description:
 
     num_reviews_to_use = 30
     # 리뷰 텍스트 결합 (너무 길면 제한)
-    reviews = [review.replace("\n", " ").strip() for review in reviews if review.replace("\n", "")]
     review_text = "\n".join(reviews[:num_reviews_to_use])  # 최대 30개 리뷰만 사용
     if len(review_text) > 100 * num_reviews_to_use:
         review_text = review_text[:100 * num_reviews_to_use]
@@ -183,7 +182,6 @@ def extract_features_with_gemini(place_id: str, reviews: list[str], description:
 def extract_features_with_openai(place_id: str, reviews: list[str], description: str) -> dict[str, list[str]]:
     num_reviews_to_use = 30
     # 리뷰 텍스트 결합 (너무 길면 제한)
-    reviews = [review.replace("\n", " ").strip() for review in reviews if review.replace("\n", "")]
     review_text = "\n".join(reviews[:num_reviews_to_use])  # 최대 30개 리뷰만 사용
     if len(review_text) > 100 * num_reviews_to_use:
         review_text = review_text[:100 * num_reviews_to_use]
@@ -264,10 +262,12 @@ def process_restaurant(raw_data: dict[str, Any]) -> dict[str, Any]:
     lat, lon = convert_coordinates(raw_data.get("mapx"), raw_data.get("mapy"))
     
     # 2. LLM을 사용한 특징 추출
+    reviews = [review.replace("\n", " ").strip() for review in raw_data.get("reviews", []) if review.replace("\n", " ").strip()]
+    reviews = [review for review in raw_data.get("reviews", []) if len(review) >= 15]
     # extracted_features = extract_features_with_gemini(
     extracted_features = extract_features_with_openai(
         raw_data["place_id"],
-        raw_data.get("reviews", []),
+        reviews,
         raw_data.get("description", "")
     )
 
