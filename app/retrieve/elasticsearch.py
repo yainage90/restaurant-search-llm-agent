@@ -37,7 +37,7 @@ def build_elasticsearch_query(
         "knn": {
             "field": "embedding",
             "query_vector": query_embedding,
-            "k": 5,
+            "k": 3,
             "num_candidates": 100,
             "filter": [],
         }
