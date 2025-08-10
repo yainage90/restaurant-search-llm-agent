@@ -1,6 +1,6 @@
 """
-식당 특징 데이터에 임베딩을 추가하는 스크립트
-extract_features.py에서 생성된 jsonl 파일들을 읽어서 임베딩을 추가
+식당 특징 데이터에서 임베딩만 추출하여 저장하는 스크립트
+extract_features.py에서 생성된 jsonl 파일들을 읽어서 임베딩만 추출하여 별도 파일로 저장
 """
 
 import os
@@ -11,7 +11,7 @@ from app.retrieve.embeddings import get_document_embeddings
 
 def process_batch_embeddings(documents: list[dict], batch_size: int = 100) -> list[dict]:
     """
-    문서들의 summary를 batch로 임베딩 추출
+    문서들의 summary를 batch로 임베딩 추출하여 place_id, embedding 형태로 반환
     """
     results = []
     
@@ -22,10 +22,12 @@ def process_batch_embeddings(documents: list[dict], batch_size: int = 100) -> li
         # 배치로 임베딩 추출
         embeddings = get_document_embeddings(summaries)
         
-        # 각 문서에 임베딩 추가
+        # place_id와 embedding만 저장
         for doc, embedding in zip(batch, embeddings):
-            doc["embedding"] = embedding
-            results.append(doc)
+            results.append({
+                "place_id": doc["place_id"],
+                "embedding": embedding
+            })
     
     return results
 
@@ -33,7 +35,7 @@ def process_batch_embeddings(documents: list[dict], batch_size: int = 100) -> li
 def main():
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     INPUT_DIR = os.path.join(BASE_DIR, "../../data/featured_restaurants")
-    OUTPUT_DIR = os.path.join(BASE_DIR, "../../data/documents")
+    OUTPUT_DIR = os.path.join(BASE_DIR, "../../data/embeddings")
     
     # 출력 디렉토리 생성
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -53,8 +55,8 @@ def main():
         if os.path.exists(output_file_path):
             with open(output_file_path, "r", encoding="utf-8") as f_out:
                 for line in f_out:
-                    document = json.loads(line)
-                    processed_place_ids.add(document["place_id"])
+                    embedding_data = json.loads(line)
+                    processed_place_ids.add(embedding_data["place_id"])
         
         # 처리할 문서들 로드
         documents_to_process = []
@@ -69,14 +71,14 @@ def main():
             continue
         
         # 배치로 임베딩 처리
-        processed_documents = process_batch_embeddings(documents_to_process, batch_size=100)
+        embedding_results = process_batch_embeddings(documents_to_process, batch_size=100)
         
         # 결과 저장
         with open(output_file_path, "a", encoding="utf-8") as f_out:
-            for document in processed_documents:
-                f_out.write(f"{json.dumps(document, ensure_ascii=False)}\n")
+            for embedding_data in embedding_results:
+                f_out.write(f"{json.dumps(embedding_data, ensure_ascii=False)}\n")
         
-        print(f"Completed {input_filename} - processed {len(processed_documents)} documents")
+        print(f"Completed {input_filename} - processed {len(embedding_results)} embeddings")
 
 
 if __name__ == "__main__":

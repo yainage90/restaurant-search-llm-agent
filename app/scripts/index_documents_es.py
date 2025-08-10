@@ -298,7 +298,7 @@ def load_and_index_from_json(
     alias_name: str = "restaurants",
     backup_count: int = 1,
 ) -> None:
-    """documents 디렉토리의 part-*.jsonl 파일들에서 데이터를 읽어 Elasticsearch에 색인 (무중단 배포)"""
+    """documents 디렉토리의 part-*.jsonl 파일들에서 완성된 문서 데이터를 읽어 Elasticsearch에 색인 (무중단 배포)"""
     
     # Elasticsearch 클라이언트 생성
     es = create_elasticsearch_client()
