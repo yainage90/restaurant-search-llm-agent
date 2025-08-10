@@ -6,7 +6,9 @@ README.md의 섹션 5에 따라 전처리 및 LLM 기반 정보 추출을 수행
 import os
 import json
 import re
+import argparse
 from typing import Any
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 from google import genai
 from openai import OpenAI
@@ -197,7 +199,25 @@ def extract_features_with_openai(place_id: str, reviews: list[str], description:
         text_format=LLMFeatures,
     )
 
-    return response.output_parsed.model_dump()
+    try:
+        llm_features = response.output_parsed.model_dump()
+    except:
+        print(f"JSONDecodeError: {place_id}")
+        return None
+
+    return llm_features
+
+def extract_features(
+    place_id: str,
+    reviews: list[str],
+    description: str,
+    platform: str = 'openai',
+) -> dict[str, list[str]]:
+    if platform == "gemini":
+        return extract_features_with_gemini(place_id, reviews, description)
+    
+    return extract_features_with_openai(place_id, reviews, description)
+    
 
 
 def create_summary(
@@ -242,7 +262,7 @@ def create_summary(
 
 
 
-def process_restaurant(raw_data: dict[str, Any]) -> dict[str, Any]:
+def process_restaurant(raw_data: dict[str, Any], platform: str = 'openai') -> dict[str, Any]:
     """
     원본 식당 데이터를 검색용 문서로 변환
     """
@@ -264,11 +284,11 @@ def process_restaurant(raw_data: dict[str, Any]) -> dict[str, Any]:
     # 2. LLM을 사용한 특징 추출
     reviews = [review.replace("\n", " ").strip() for review in raw_data.get("reviews", []) if review.replace("\n", " ").strip()]
     reviews = [review for review in raw_data.get("reviews", []) if len(review) >= 15]
-    # extracted_features = extract_features_with_gemini(
-    extracted_features = extract_features_with_openai(
+    extracted_features = extract_features(
         raw_data["place_id"],
         reviews,
-        raw_data.get("description", "")
+        raw_data.get("description", ""),
+        platform
     )
 
     # 3. 요약 생성
@@ -340,6 +360,16 @@ def print_test():
     print(json.dumps(document, ensure_ascii=False, indent=2))
 
 
+def process_single_restaurant(args_tuple):
+    """단일 식당 데이터 처리 (병렬 처리용)"""
+    raw_data, platform = args_tuple
+    try:
+        return process_restaurant(raw_data, platform)
+    except Exception as e:
+        print(f"Error processing {raw_data.get('place_id', 'unknown')}: {e}")
+        return None
+
+
 def main():
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     INPUT_DIR = os.path.join(BASE_DIR, "../../data/crawled_restaurants")
@@ -383,39 +413,68 @@ def main():
             print("✅ 이미 모든 데이터 처리 완료\n")
             continue
         
-        # 파일 처리
+        # 파일 처리 (병렬 처리)
         failed_count = 0
         
+        # 처리할 데이터 수집
+        tasks = []
+        with open(input_file_path, "r", encoding="utf-8") as f_in:
+            for line in f_in:
+                raw_data = json.loads(line)
+                if raw_data["place_id"] not in processed_place_ids:
+                    tasks.append((raw_data, platform))
+        
+        # 병렬 처리 실행
         with open(output_file_path, "a", encoding="utf-8") as f_out:
-            with open(input_file_path, "r", encoding="utf-8") as f_in:
-                progress_bar = tqdm(
-                    total=remaining_count,
-                    desc="처리중",
-                    unit="개",
-                    ncols=80,
-                    bar_format="{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]"
-                )
+            progress_bar = tqdm(
+                total=len(tasks),
+                desc="처리중",
+                unit="개",
+                ncols=80,
+                bar_format="{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]"
+            )
+            
+            with ThreadPoolExecutor(max_workers=parallelism) as executor:
+                # 작업 제출
+                future_to_task = {executor.submit(process_single_restaurant, task): task for task in tasks}
                 
-                for line in f_in:
-                    raw_data = json.loads(line)
-                    if raw_data["place_id"] in processed_place_ids:
-                        continue
-
-                    document = process_restaurant(raw_data)
+                # 완료된 작업 처리
+                for future in as_completed(future_to_task):
+                    document = future.result()
                     if not document:
                         failed_count += 1
-                        progress_bar.set_postfix({"실패": failed_count})
-                        progress_bar.update(1)
-                        continue
-
-                    f_out.write(f"{json.dumps(document, ensure_ascii=False)}\n")
+                    else:
+                        f_out.write(f"{json.dumps(document, ensure_ascii=False)}\n")
+                        f_out.flush()  # 즉시 파일에 쓰기
+                    
                     progress_bar.set_postfix({"실패": failed_count})
                     progress_bar.update(1)
-                
-                progress_bar.close()
+            
+            progress_bar.close()
         
         print(f"✅ 완료 - 실패: {failed_count}개\n")
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="식당 데이터에서 특징을 추출하는 스크립트")
+    parser.add_argument(
+        "--platform", 
+        choices=["openai", "gemini"], 
+        default="openai",
+        help="사용할 LLM 플랫폼 (기본값: openai)"
+    )
+    parser.add_argument(
+        "--parallelism",
+        type=int,
+        default=5,
+        help="동시 처리할 요청 수 (기본값: 5)"
+    )
+    
+    args = parser.parse_args()
+    platform = args.platform
+    parallelism = args.parallelism
+    
+    print(f"🤖 사용 플랫폼: {platform}")
+    print(f"🔄 병렬 처리: {parallelism}개 동시 요청\n")
+    
     main()
