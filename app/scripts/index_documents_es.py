@@ -3,6 +3,7 @@ import os
 import json
 import glob
 from datetime import datetime
+from pytz import timezone
 from elasticsearch import Elasticsearch
 from elasticsearch.helpers import bulk
 from app.retrieve.embeddings import EMBEDDING_SIZE
@@ -39,7 +40,7 @@ def read_synonyms(synonyms_file_path: str) -> list[str]:
 
 def generate_timestamped_index_name() -> str:
     """타임스탬프를 포함한 인덱스 이름 생성"""
-    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    timestamp = datetime.now(timezone("Asia/Seoul")).strftime("%Y%m%d%H%M%S")
     return f"restaurants_{timestamp}"
 
 
@@ -165,12 +166,12 @@ def create_index_mapping(es: Elasticsearch, index_name: str) -> None:
                     "index_analyzer": {
                         "type": "custom",
                         "tokenizer": "nori",
-                        "filter": ["nori_part_of_speech", "lowercase"]
+                        "filter": ["lowercase"]
                     },
                     "search_analyzer": {
                         "type": "custom",
                         "tokenizer": "nori",
-                        "filter": ["nori_part_of_speech", "lowercase", "synonym_filter"]
+                        "filter": ["lowercase", "synonym_filter"]
                     }
                 }
             }

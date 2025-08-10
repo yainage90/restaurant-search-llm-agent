@@ -2,6 +2,7 @@ from dotenv import load_dotenv
 import os
 import json
 from datetime import datetime
+from pytz import timezone
 from elasticsearch import Elasticsearch
 from elasticsearch.helpers import bulk
 from typing import Any
@@ -25,7 +26,7 @@ def create_elasticsearch_client() -> Elasticsearch:
 
 def generate_timestamped_index_name() -> str:
     """타임스탬프를 포함한 인덱스 이름 생성"""
-    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    timestamp = datetime.now(timezone("Asia/Seoul")).strftime("%Y%m%d%H%M%S")
     return f"coordinates_{timestamp}"
 
 
