@@ -56,19 +56,29 @@ def build_elasticsearch_query(
                     }
                 })
             elif location["relation"] == "nearby":
-                # 위치 기반 검색
-                # poi_location = search_naver_poi(location["name"])
-                # if poi_location:
-                #     es_query["knn"]["filter"].append({
-                #         "geo_distance": {
-                #             "distance": "3km",
-                #             "pin.coordinate": {
-                #                 "lat": poi_location["lat"],
-                #                 "lon": poi_location["lon"]
-                #             }
-                #         }
-                #     })
-                pass
+                coordinates_results = search_coordinates_index(location["name"])
+                
+                if coordinates_results:
+                    if (len(coordinates_results) == 1) or (coordinates_results[0]["name"].strip() == location["name"].strip()):
+                        coord = coordinates_results[0]["pin"]["coordinate"]
+                        es_query["knn"]["filter"].append({
+                            "geo_distance": {
+                                "distance": "3km",
+                                "pin.coordinate": {
+                                    "lat": coord["lat"],
+                                    "lon": coord["lon"]
+                                }
+                            }
+                        })
+                    else:
+                        es_query["knn"]["filter"].append({
+                            "match": {
+                                "address": {
+                                    "query": location["name"]
+                                }
+                            }
+                        })
+                
     
     # convenience 필터링 (필수 조건)
     if conveniences := structured_query.get("convenience"):
@@ -129,6 +139,34 @@ def build_elasticsearch_query(
         )
 
     return es_query
+
+
+def search_coordinates_index(query: str) -> list[dict[str, Any]]:
+    """coordinates 인덱스에서 검색하는 함수"""
+    es = create_elasticsearch_client()
+    
+    search_query = {
+        "query": {
+            "match": {
+                "name": {
+                    "query": query,
+                    "operator": "and"
+                }
+            }
+        },
+    }
+    
+    try:
+        response = es.search(index="coordinates", body=search_query)
+        results = []
+        for hit in response["hits"]["hits"]:
+            results.append(hit["_source"])
+        
+        return results
+        
+    except Exception as e:
+        print(f"coordinates 인덱스 검색 오류: {e}")
+        return []
 
 
 def search_elasticsearch(es_query: dict[str, Any], index_name: str = "restaurants") -> list[dict[str, Any]]:
