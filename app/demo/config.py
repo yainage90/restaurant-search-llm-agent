@@ -58,7 +58,7 @@ class UIMessages:
     ]
     
     # 테스트 쿼리들
-    test_structure_query = "강남역 주차되는 일식집"
+    test_nlu_query = "강남역 주차되는 일식집"
     test_search_query = "마포 진대감 주차되나요?"
     test_relevance_query = "강남역 주차되는 일식집"
     

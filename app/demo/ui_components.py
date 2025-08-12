@@ -81,8 +81,8 @@ def create_structure_query_tab(test_fn: Callable) -> None:
         with gr.Column():
             query_input = gr.Textbox(
                 label="테스트 쿼리",
-                placeholder=f"예: {ui_messages.test_structure_query}",
-                value=ui_messages.test_structure_query
+                placeholder=f"예: {ui_messages.test_nlu_query}",
+                value=ui_messages.test_nlu_query
             )
             structure_btn = gr.Button("의도/개체 탐지 테스트", variant="primary")
         
@@ -181,7 +181,7 @@ def create_relevance_test_tab(
 
 
 def create_admin_dashboard(
-    test_structure_query_fn: Callable,
+    test_nlu_fn: Callable,
     test_search_module_fn: Callable,
     get_relevance_evaluation_fn: Callable,
     get_search_results_summary_fn: Callable
@@ -192,7 +192,7 @@ def create_admin_dashboard(
     with gr.Tabs():
         # 의도/개체 탐지 모듈 테스트
         with gr.Tab("🔄 의도/개체 탐지"):
-            create_structure_query_tab(test_structure_query_fn)
+            create_structure_query_tab(test_nlu_fn)
         
         # 검색 모듈 테스트
         with gr.Tab("🔍 검색"):
