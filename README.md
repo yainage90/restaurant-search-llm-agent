@@ -85,24 +85,37 @@ flowchart TD
     Need Search Decision}
     C -.->|"검색 필요"| D{대화 상태 확인
     Check Session State}
-    C -.->|"검색 불필요"| K[기존 컨텍스트로 응답
+    C -.->|"검색 불필요"| L[기존 컨텍스트로 응답
     Generate with Context]
     D -.->|"첫 대화"| E[새로운 검색 수행
     Perform New Search]
     D -.->|"후속 대화"| F{중복 검색 확인
     Check Duplicate Search}
-    F -.->|"유사한 검색"| K
+    F -.->|"유사한 검색"| L
     F -.->|"새로운 검색"| E
-    E --> G[쿼리 구조화
-    Structure Query]
-    G --> H[검색 실행
-    Retrieve Documents]
-    H --> I[세션 컨텍스트 업데이트
+    E --> G[의도 탐지 및 개체명 인식
+    Intent Classification & Entity Extraction]
+    G --> P{의도 분류}
+    P -.->|"search"| H1[일반 검색
+    General Search]
+    P -.->|"compare"| H2[비교 검색
+    Compare Search]
+    P -.->|"information"| H3[정보 검색
+    Information Search]
+    H1 --> I[연관도 평가
+    Relevance Evaluation]
+    H2 --> I
+    H3 --> I
+    I --> N{연관성 판단}
+    N -.->|"relevant"| J[세션 컨텍스트 업데이트
     Update Session Context]
-    I --> J[응답 생성
+    N -.->|"irrelevant"| O[웹 검색
+    Web Search]
+    O --> J
+    J --> K[응답 생성
     Generation]
-    K --> J
-    J --> L([END])
+    L --> K
+    K --> M([END])
 ```
 
 ### 1. 쿼리 인입(Natural Language Query Input)
@@ -133,64 +146,102 @@ LLM이 현재 사용자 메시지, 이전 검색 기록, 대화 히스토리를 
 
 ### 5. 새로운 검색 수행(Perform New Search)
 
-실제로 새로운 검색을 수행하는 단계로, 기존의 쿼리 구조화 → 검색 실행 → 컨텍스트 업데이트 과정을 거친다.
+실제로 새로운 검색을 수행하는 단계로, 의도 탐지 및 개체명 인식 → 검색 실행 → 컨텍스트 업데이트 과정을 거친다.
 
-### 6. 쿼리 구조화(Structure Query)
+### 6. 의도 탐지 및 개체명 인식(Intent Classification & Entity Extraction)
 
-검색시 입력한 자연어 쿼리를 검색에 용이한 형태로 구조화하는 단계. 여러가지 NLU(Natural Language Understanding - 자연어 이해) 기술 적용이 필요하다.
+입력된 자연어 쿼리에서 검색 의도(search/compare/information)를 분류하고 필요한 엔티티를 추출하는 NLU(Natural Language Understanding) 단계. Gemini 2.5 Flash Lite 모델을 사용하여 정확한 의도 파악과 엔티티 추출을 수행한다.
 
-### 7. 검색 실행(Retrieve Documents)
+### 7. 의도 분류
 
-구조화된 쿼리 및 벡터 검색을 통해 유저가 원하는 정보와 관련있는 문서를 찾는 단계이다. Elasticsearch를 사용하여 키워드 매칭, 필터링, 벡터 유사도 검색을 통합적으로 수행한다.
+NLU 결과에 따라 적절한 검색 전략을 선택하는 분기점이다.
+- **search**: 일반적인 맛집 검색 → 일반 검색 전략
+- **compare**: 여러 식당 비교 → 비교 검색 전략  
+- **information**: 특정 식당 정보 요청 → 정보 검색 전략
 
-### 8. 세션 컨텍스트 업데이트(Update Session Context)
+### 8. 일반 검색(General Search)
 
-검색 결과를 세션 매니저에 저장하여 후속 대화에서 재사용할 수 있도록 하는 단계이다.
+포괄적인 맛집 검색을 위한 전략으로, 추출된 모든 엔티티를 활용한다. 지역 필터, 카테고리 필터, 메뉴 필터, 편의시설 필터를 적용하여 3개 문서를 검색한다.
 
-### 9. 기존 컨텍스트로 응답(Generate with Context)
+### 9. 비교 검색(Compare Search)
+
+여러 식당을 비교하기 위한 전략으로, 각 식당명에 대해 개별 쿼리를 실행한다. 각 쿼리당 2개씩 문서를 검색하여 비교 대상을 확보하고 중복을 제거한다.
+
+### 10. 정보 검색(Information Search)
+
+특정 식당에 대한 상세 정보를 제공하기 위한 전략이다. 식당명이 있는 경우 정확한 매칭을 우선하고, 지역만 있는 경우 더 많은 결과(5개)를 반환한다.
+
+### 11. 연관도 평가(Relevance Evaluation)
+
+검색된 문서들이 사용자 질의에 얼마나 관련성이 있는지 LLM을 사용해 평가하는 단계이다. Gemini 2.5 Flash Lite로 각 문서를 'relevant'/'irrelevant'로 판단하여 관련성이 높은 문서만 필터링한다.
+
+### 12. 연관성 판단
+
+연관도 평가 결과에 따라 다음 단계를 결정하는 분기점이다.
+- **relevant**: 관련성이 높은 문서들이 발견된 경우 → 세션 컨텍스트 업데이트로 진행
+- **irrelevant**: 모든 문서가 관련성이 낮은 경우 → 웹 검색으로 대체
+
+### 13. 웹 검색(Web Search)
+
+식당 데이터베이스에서 관련성 높은 결과를 찾지 못한 경우, Tavily API를 사용하여 웹에서 관련 정보를 검색하는 단계이다. 웹 검색 결과도 세션 컨텍스트에 저장된다.
+
+### 14. 세션 컨텍스트 업데이트(Update Session Context)
+
+연관도 평가를 통과한 검색 결과 또는 웹 검색 결과를 세션 매니저에 저장하여 후속 대화에서 재사용할 수 있도록 하는 단계이다.
+
+### 15. 기존 컨텍스트로 응답(Generate with Context)
 
 새로운 검색 없이 이전에 저장된 검색 결과와 대화 히스토리를 활용하여 응답을 생성하는 단계이다.
 
-### 10. 응답 생성(Generation)
+### 16. 응답 생성(Generation)
 
 유저의 자연어 질의와 검색된 문서(또는 기존 컨텍스트)를 하나의 컨텍스트로 구성하여 LLM에 응답 생성을 요청한다.
 
 <br>
 
-# 4. 쿼리 구조화(Structure Query)
+# 4. 의도 탐지 및 개체명 인식(Intent Classification & Entity Extraction)
 
-검색시 입력한 자연어 쿼리에서 핵심 정보를 추출해 검색에 적합한 구조화된 쿼리(Structured Query)로 변경하는 단계이다.
+자연어 쿼리에서 검색 의도를 분류하고 필요한 엔티티를 추출하는 NLU(Natural Language Understanding) 단계이다. Gemini 2.5 Flash Lite 모델을 사용하여 구조화된 JSON 형태로 결과를 생성한다.
 
-- 구조화된 쿼리의 필드
-  - `location`: 위치 정보
-    - `name`: 지역명(강남역, 정자동, 타임스퀘어)
-    - `relation`: 관련성 (exact: 특정 식당명, nearby: 근처)
-  - `category`: 카테고리(예: 한식, 일식, 중식, 양식, 퓨전요리)
-  - `menu`
-    - `value`: 메뉴명(예: 국밥, 치킨, 회, 돈가스, 파스타)
-    - `need_filter`: 필터링 필요 여부(1|0)
-  - `convenience`
-    - `value`: 편의(예: 주차, 배달, 포장, 예약, 룸, 반려동물, 고기구워주는)
-    - `need_filter`: 필터링 필요 여부(1|0)
-  - `atmosphere`: 분위기(예: 이국적인, 색다른, 로맨틱한)
-  - `occasion`: 상황(예: 회식, 단체, 데이트, 혼밥, 가족)
+### 의도 분류
+
+- `search`: 일반적인 검색 (예: "강남역 일식집 추천", "주차되는 식당")
+- `compare`: 여러 식당 비교 (예: "A와 B 중 어디가 더 맛있어?", "버거킹과 맥도날드 비교")  
+- `information`: 특정 식당 정보 요청 (예: "진대감 영업시간", "버거킹 메뉴")
+
+### 엔티티 추출
+
+- `location`: 위치 정보 (지역명, 식당명. 예: 정자역, 마포)
+- `title`: 식당명 (비교나 정보 요청 시 중요)
+- `menu`: 메뉴명(예: 국밥, 치킨, 회, 돈가스, 파스타)
+- `category`: 식당 카테고리(예: 한식, 일식, 중식, 양식, 퓨전요리)
+- `convenience`: 편의사항(주차|발렛|배달|포장|예약|룸|콜키지|반려동물|와이파이|24시|구워줌)
+- `atmosphere`: 분위기(예: 이국적인, 색다른, 로맨틱한)
+- `occasion`: 상황(예: 회식, 단체, 데이트, 혼밥, 가족)
+
+### NLU 처리 결과 예시
 
 > 예시 1) query: "강남역 주차되는 일식집"
 
 ```json
 {
-  "location": [{ "name": "강남역", "relation": "nearby" }],
-  "category": ["일식"],
-  "convenience": [{ "value": "주차", "need_filter": 1 }]
+  "intent": "search",
+  "entities": {
+    "location": ["강남역"],
+    "category": ["일식"],
+    "convenience": ["주차"]
+  }
 }
 ```
 
-> 예시 2) query: "판교 애견동반 식당"
+> 예시 2) query: "버거킹과 맥도날드 중 어디가 더 맛있어?"
 
 ```json
 {
-  "location": [{ "name": "판교", "relation": "nearby" }],
-  "convenience": [{ "value": "반려동물", "need_filter": 1 }]
+  "intent": "compare", 
+  "entities": {
+    "title": ["버거킹", "맥도날드"]
+  }
 }
 ```
 
@@ -198,11 +249,12 @@ LLM이 현재 사용자 메시지, 이전 검색 기록, 대화 히스토리를 
 
 ```json
 {
-  "location": [
-    { "name": "마포", "relation": "nearby" },
-    { "name": "진대감", "relation": "exact" }
-  ],
-  "convenience": [{ "value": "주차", "need_filter": 0 }]
+  "intent": "information",
+  "entities": {
+    "location": ["마포"],
+    "title": ["진대감"],
+    "convenience": ["주차"]
+  }
 }
 ```
 
@@ -210,8 +262,11 @@ LLM이 현재 사용자 메시지, 이전 검색 기록, 대화 히스토리를 
 
 ```json
 {
-  "menu": [{ "value": "맥주", "need_filter": 0 }],
-  "atmosphere": ["조용한"]
+  "intent": "search",
+  "entities": {
+    "menu": ["맥주"],
+    "atmosphere": ["조용한"]
+  }
 }
 ```
 
@@ -219,13 +274,16 @@ LLM이 현재 사용자 메시지, 이전 검색 기록, 대화 히스토리를 
 
 ```json
 {
-  "location": [{ "name": "홍대", "relation": "nearby" }],
-  "menu": [{ "value": "삼겹살", "need_filter": 0 }],
-  "occasion": ["회식"]
+  "intent": "search",
+  "entities": {
+    "location": ["홍대"],
+    "menu": ["삼겹살"],
+    "occasion": ["회식"]
+  }
 }
 ```
 
-구조화된 쿼리에서 `location`, `category`, `menu`, `convenience`는 필수로 충족되어야 하는 성질의 조건이므로 필터링을 수행하는 용도로 사용하고, `atmosphere`, `occasion`은 점수 부스팅 용도로 사용함. 이러한 키워드 검색에 더불어 벡터 검색을 수행한다.
+추출된 엔티티 중 `location`, `title`, `category`, `menu`, `convenience`는 Elasticsearch 필터링에 사용되고, `atmosphere`, `occasion`은 벡터 검색에서 의미적 유사도 계산에 활용된다.
 
 <br>
 
@@ -368,56 +426,64 @@ f"기타 특징: {','.join(features) if features else None}"
 
 <br>
 
-# 6. 검색 쿼리 <-> 문서 매칭 전략
+# 6. 의도별 검색 전략
 
-- query: `location.name`
+NLU 모듈에서 분류된 의도에 따라 다른 검색 전략을 적용한다.
 
-  - `location.relation`이 `exact`일 경우 문서의 `title` 대상으로 검색한다. 검색결과가 있을 경우 해당 식당 정보를 가져온다. 이렇게 되면 검색은 여기서 끝나고 유저의 자연어 질의어와 업체 정보를 컨텍스트로 묶어 LLM에 답변 요청을 생성한다.
-  - `location.relation`이 `nearby`일 경우 네이버 검색 API를 활용해 해당 POI(Point Of Interest)를 검색한다. 예를들어 검색어가 '정자역'인 경우 네이버 검색 API에서 받아온 정자역의 위도, 경도를 중심으로 반경을 제한하는 geo 쿼리를 구조화된 쿼리에 추가하여 필터링을 수행한다.
+### Search 의도
+일반적인 맛집 검색으로, 추출된 모든 엔티티를 활용하여 포괄적인 검색을 수행한다.
+- `location`: 지역 필터 (coordinates 인덱스에서 위도/경도 조회 후 geo_distance 쿼리)
+- `category`: 카테고리 필터 (정확한 매칭)
+- `menu`: 메뉴 필터 (메뉴명과 리뷰 음식에서 검색)
+- `convenience`: 편의시설 필터 (필수 조건)
+- `atmosphere`, `occasion`: 벡터 검색으로 의미적 유사도 반영
 
-- query: `category` -> document: `category`,
+### Compare 의도  
+여러 식당을 비교하는 검색으로, 각 식당별로 개별 쿼리를 실행한다.
+- `title` 엔티티의 각 식당명에 대해 별도 검색 실행
+- 각 쿼리당 2개씩 문서 검색하여 비교 대상 확보
+- 중복 제거 후 최종 결과 반환
 
-- query: `menu` -> document: `menus.name`, `review_food`
+### Information 의도
+특정 식당에 대한 정보 요청으로, 정확한 매칭에 중점을 둔다.
+- `title`이 있는 경우: 해당 식당명으로 정확한 검색
+- `location`만 있는 경우: 지역 기반 검색으로 더 많은 결과(5개) 반환
 
-- query: `convenience` -> document: `convenience`
+### 연관성 평가 및 필터링
+모든 검색 결과는 LLM 기반 연관성 평가를 거쳐 관련성이 높은 문서만 필터링된다.
+- Gemini 2.5 Flash Lite로 각 문서의 관련성을 'relevant'/'irrelevant'로 판단
+- 'relevant' 문서만 최종 결과로 반환
 
-  - `convenience`는 필수적으로 만족해야 하는 조건이므로 문서의 `convenience`에 대해 필터링을 수행한다.
-
-- query: `atmosphere`, `occasion`
-
-  - 하드 필터링 하기에는 선택적 조건이라 생각된다. 따라서 검색에 직접적으로 사용하지 않는다. 자연어 질의에 해당 키워드가 포함되어있으므로 벡터 검색에 해당 조건이 잘 반영될 것이라 생각된다.
-
-- 쿼리 예시
+### 쿼리 처리 예시
 
 1. 자연어 질의: "강남역 주차되는 일식집"
-2. 쿼리 구조화:
-
+2. NLU 결과:
 ```json
 {
-  "location": [{ "name": "강남역", "relation": "nearby" }],
-  "convenience": ["주차"],
-  "category": ["일식"]
+  "intent": "search",
+  "entities": {
+    "location": ["강남역"],
+    "category": ["일식"], 
+    "convenience": ["주차"]
+  }
 }
 ```
 
-3. 네이버 검색 API에서 강남역 검색 후 x, y 좌표 가져오기
-4. embedding: 쿼리임베딩("강남역 주차되는 일식집")
-5. 최종 엘라스틱서치 쿼리
-
+3. 최종 Elasticsearch 쿼리:
 ```python
 {
     "knn": {
         "field": "embedding",
         "query_vector": embedding,
-        "k": 5,
+        "k": 3,
         "num_candidates": 100,
         "filter": [
             {
                 "geo_distance": {
                     "distance": "3km",
-                    "coordinate": {
-                        "lat": y, # 강남역 위도
-                        "lon": x, # 강남역 경도
+                    "pin.coordinate": {
+                        "lat": 37.497952,  # 강남역 위도
+                        "lon": 127.027619  # 강남역 경도
                     }
                 }
             },
@@ -425,32 +491,85 @@ f"기타 특징: {','.join(features) if features else None}"
                 "match": {
                     "convenience": {
                         "query": "주차",
+                        "operator": "and"
                     }
                 }
             },
             {
-                "category": {
-                    "match": {
+                "match": {
+                    "category": {
                         "query": "일식",
-                        "operator": "and",
+                        "operator": "and"
                     }
                 }
             }
         ]
     },
-    "size": 5
+    "size": 3
 }
 ```
 
 <br>
 
-# 7. 벡터 데이터베이스
+# 7. 벡터 데이터베이스 및 검색 시스템
 
-키워드 매칭 및 필터링이 필요하므로 단순 벡터 유사도 검색만 지원하는 크로마(Chroma), 어노이(Annoy) 처럼 설치없이 간단하게 사용할 수 있는 벡터 검색 라이브러리는 사용할 수 없다. 키워드 검색/필터 기능 및 위치 기반 근거리 검색을 위해 엘라스틱서치(Elasticsearch)를 사용한다.
+NLU 기반 의도별 검색과 LLM 연관성 평가가 통합된 하이브리드 검색 시스템을 구현한다.
+
+### Elasticsearch 선택 이유
+- 키워드 매칭, 필터링, 벡터 검색을 모두 지원하는 통합 플랫폼
+- 지리 기반 검색(geo_distance)으로 위치 중심 맛집 검색 가능
+- 의도별로 다른 검색 전략을 유연하게 구현 가능
+- KNN 벡터 검색과 필터 조건을 결합한 복합 쿼리 지원
+
+### 검색 파이프라인
+1. **NLU 처리**: 자연어 → 의도분류 + 엔티티추출
+2. **전략 선택**: 의도별 검색 전략 (search/compare/information)
+3. **쿼리 생성**: 엔티티 기반 Elasticsearch 쿼리 구성
+4. **검색 실행**: 벡터 유사도 + 키워드 필터링 통합 검색
+5. **연관성 평가**: LLM으로 검색 결과의 관련성 판단 및 필터링
 
 <br>
 
-# 8. 답변 생성
+# 8. 연관도 평가(Relevance Evaluation)
+
+검색된 문서들이 사용자의 질의에 얼마나 관련성이 있는지 LLM을 활용해 평가하고 필터링하는 단계이다.
+
+### 평가 방식
+- **모델**: Gemini 2.5 Flash Lite 사용
+- **평가 기준**: 'relevant' (관련있음) / 'irrelevant' (관련없음)
+- **평가 범위**: 전체 연관성 + 개별 문서별 연관성
+
+### 평가 과정
+1. **문서 구조화**: 검색된 각 문서의 핵심 정보(식당명, 주소, 메뉴, 편의시설 등) 추출
+2. **프롬프트 생성**: 사용자 질의와 문서 정보를 포함한 평가 프롬프트 구성
+3. **LLM 평가**: 각 문서의 관련성과 전체적인 연관도 판단
+4. **결과 필터링**: 'relevant'로 판정된 문서만 최종 결과로 반환
+
+### 평가 결과 구조
+```json
+{
+  "overall_relevance": "relevant" | "irrelevant",
+  "reason": "전체 판단 근거",
+  "document_scores": [
+    {
+      "document_id": "1",
+      "relevance": "relevant" | "irrelevant", 
+      "reason": "개별 문서 판단 근거"
+    }
+  ]
+}
+```
+
+### 필터링 로직
+- `overall_relevance`가 'relevant'인 경우에만 결과 반환
+- 개별 문서 중 'relevant'로 판정된 것들만 선별
+- 모든 문서가 'irrelevant'인 경우 빈 결과 반환
+
+이를 통해 검색 정확도를 높이고 사용자에게 더 관련성 높은 맛집 정보만 제공할 수 있다.
+
+<br>
+
+# 9. 답변 생성
 
 1. 엘라스틱서치 검색결과 문서 구조
 
