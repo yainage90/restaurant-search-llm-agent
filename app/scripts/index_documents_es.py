@@ -21,7 +21,7 @@ def create_elasticsearch_client(
     password = os.environ.get("ELASTICSEARCH_PASSWORD")
 
     return Elasticsearch(
-        [f"http://{host}"],
+        [host],
         basic_auth=(username, password),
         verify_certs=False
     )
@@ -57,6 +57,14 @@ def create_index_mapping(es: Elasticsearch, index_name: str) -> None:
                     "fields": {
                         "raw": {"type": "keyword"}
                     }
+                },
+                "category": {
+                    "type": "text",
+                    "analyzer": "category_index_analyzer",
+                    "search_analyzer": "category_search_analyzer",
+                    "fields": {
+                        "raw": {"type": "keyword"}
+                    },
                 },
                 "address": {
                     "type": "text",
@@ -154,12 +162,21 @@ def create_index_mapping(es: Elasticsearch, index_name: str) -> None:
                         "type": "nori_tokenizer",
                         "user_dictionary": "analysis/user_dictionary.txt",
                         "decompound_mode": "discard",
+                    },
+                    "nori_category": {
+                        "type": "nori_tokenizer",
+                        "user_dictionary": "analysis/user_dictionary.txt",
+                        "decompound_mode": "discard",
                     }
                 },
                 "filter": {
                     "synonym_filter": {
                         "type": "synonym",
                         "synonyms_path": "analysis/synonyms.txt",
+                    },
+                    "category_synonym_filter": {
+                        "type": "synonym",
+                        "synonyms_path": "analysis/category_synonyms.txt",
                     }
                 },
                 "analyzer": {
@@ -172,7 +189,17 @@ def create_index_mapping(es: Elasticsearch, index_name: str) -> None:
                         "type": "custom",
                         "tokenizer": "nori",
                         "filter": ["lowercase", "synonym_filter"]
-                    }
+                    },
+                    "category_index_analyzer": {
+                        "type": "custom",
+                        "tokenizer": "nori_category",
+                        "filter": ["lowercase"]
+                    },
+                    "category_search_analyzer": {
+                        "type": "custom",
+                        "tokenizer": "nori_category",
+                        "filter": ["lowercase", "category_synonym_filter"]
+                    },
                 }
             }
         }
