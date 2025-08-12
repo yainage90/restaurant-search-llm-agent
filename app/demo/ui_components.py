@@ -74,8 +74,8 @@ def create_chat_interface(chat_fn: Callable) -> tuple[Any, Any, Any]:
 
 
 def create_structure_query_tab(test_fn: Callable) -> None:
-    """쿼리 구조화 테스트 탭 생성"""
-    gr.Markdown("### 자연어 쿼리를 구조화된 JSON으로 변환하는 모듈을 테스트합니다.")
+    """의도/개체 탐지 테스트 탭 생성"""
+    gr.Markdown("### 자연어 쿼리에서 의도를 분류하고 개체를 추출하는 모듈을 테스트합니다.")
     
     with gr.Row():
         with gr.Column():
@@ -84,11 +84,11 @@ def create_structure_query_tab(test_fn: Callable) -> None:
                 placeholder=f"예: {ui_messages.test_structure_query}",
                 value=ui_messages.test_structure_query
             )
-            structure_btn = gr.Button("쿼리 구조화 테스트", variant="primary")
+            structure_btn = gr.Button("의도/개체 탐지 테스트", variant="primary")
         
         with gr.Column():
             structure_output = gr.Code(
-                label="구조화된 쿼리 결과",
+                label="의도/개체 탐지 결과",
                 language="json",
                 lines=15
             )
@@ -102,7 +102,7 @@ def create_structure_query_tab(test_fn: Callable) -> None:
 
 def create_search_test_tab(test_fn: Callable) -> None:
     """검색 모듈 테스트 탭 생성"""
-    gr.Markdown("### 쿼리 재작성 → 임베딩 → Elasticsearch 검색 파이프라인을 테스트합니다.")
+    gr.Markdown("### 의도/개체 탐지 → 임베딩 → Elasticsearch 검색 파이프라인을 테스트합니다.")
     
     with gr.Row():
         with gr.Column():
@@ -116,7 +116,7 @@ def create_search_test_tab(test_fn: Callable) -> None:
     with gr.Row(equal_height=True):
         with gr.Column(scale=2):
             structured_query_output = gr.Code(
-                label="1단계: 구조화된 쿼리",
+                label="1단계: 의도/개체 탐지",
                 language="json",
             )
         with gr.Column(scale=3):
@@ -190,8 +190,8 @@ def create_admin_dashboard(
     gr.Markdown("## 각 모듈의 결과를 확인하고 디버깅할 수 있는 인터페이스입니다.")
     
     with gr.Tabs():
-        # 쿼리 재작성 모듈 테스트
-        with gr.Tab("🔄 쿼리 재작성"):
+        # 의도/개체 탐지 모듈 테스트
+        with gr.Tab("🔄 의도/개체 탐지"):
             create_structure_query_tab(test_structure_query_fn)
         
         # 검색 모듈 테스트
