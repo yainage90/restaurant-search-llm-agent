@@ -162,11 +162,6 @@ def create_index_mapping(es: Elasticsearch, index_name: str) -> None:
                         "type": "nori_tokenizer",
                         "user_dictionary": "analysis/user_dictionary.txt",
                         "decompound_mode": "discard",
-                    },
-                    "nori_category": {
-                        "type": "nori_tokenizer",
-                        "user_dictionary": "analysis/user_dictionary.txt",
-                        "decompound_mode": "discard",
                     }
                 },
                 "filter": {
@@ -192,12 +187,12 @@ def create_index_mapping(es: Elasticsearch, index_name: str) -> None:
                     },
                     "category_index_analyzer": {
                         "type": "custom",
-                        "tokenizer": "nori_category",
+                        "tokenizer": "nori",
                         "filter": ["lowercase"]
                     },
                     "category_search_analyzer": {
                         "type": "custom",
-                        "tokenizer": "nori_category",
+                        "tokenizer": "nori",
                         "filter": ["lowercase", "category_synonym_filter"]
                     },
                 }
