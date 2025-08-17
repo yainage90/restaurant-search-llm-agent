@@ -473,10 +473,10 @@ def execute_compare_hybrid_search(query_text: str, entities: dict[str, Any], siz
         search_size = max(20, size // len(titles) * 2)  # title 개수에 따라 조정
         
         print(f"'{title}' BM25 검색 실행 중... (상위 {search_size}개)")
-        bm25_results = execute_bm25_search(query_text, individual_entities, "compare", search_size)
+        bm25_results = execute_bm25_search(title, individual_entities, "compare", search_size)
         
         print(f"'{title}' 벡터 검색 실행 중... (상위 {search_size}개)")
-        vector_results = execute_vector_search(query_text, individual_entities, "compare", search_size)
+        vector_results = execute_vector_search(title, individual_entities, "compare", search_size)
         
         all_bm25_results.extend(bm25_results)
         all_vector_results.extend(vector_results)
@@ -503,12 +503,41 @@ def execute_compare_hybrid_search(query_text: str, entities: dict[str, Any], siz
     print("비교 검색 RRF 재순위화 실행 중...")
     final_results = reciprocal_rank_fusion(all_bm25_results, all_vector_results)
     
-    # 상위 결과만 반환
-    final_results = final_results[:size]
+    # 비교 검색에서는 각 title별로 균등하게 결과 분배
+    titles = entities.get("title", [])
+    balanced_results = []
+    results_per_title = max(1, size // len(titles))  # 각 title당 최소 1개씩
     
-    print(f"비교 검색 완료: {len(final_results)}개 문서")
+    title_counts = {title: 0 for title in titles}
     
-    return final_results
+    # 각 title별로 최소 개수 보장
+    for result in final_results:
+        result_title = result.get("title", "")
+        
+        # 해당 결과가 어떤 title에 매치되는지 확인
+        matched_title = None
+        for title in titles:
+            if title.lower() in result_title.lower():
+                matched_title = title
+                break
+        
+        if matched_title and title_counts[matched_title] < results_per_title:
+            balanced_results.append(result)
+            title_counts[matched_title] += 1
+    
+    # 남은 슬롯을 상위 결과로 채우기
+    remaining_slots = size - len(balanced_results)
+    for result in final_results:
+        if remaining_slots <= 0:
+            break
+        if result not in balanced_results:
+            balanced_results.append(result)
+            remaining_slots -= 1
+    
+    print(f"비교 검색 완료: {len(balanced_results)}개 문서")
+    print(f"title별 분배: {title_counts}")
+    
+    return balanced_results[:size]
 
 
 def hybrid_search(query_text: str, entities: dict[str, Any], intent: str = "search", size: int = 5) -> list[dict[str, Any]]:
