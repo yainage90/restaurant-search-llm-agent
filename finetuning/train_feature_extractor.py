@@ -124,7 +124,7 @@ def main():
 
     # 1. 데이터셋 로드
     print("\n1. 데이터셋 로드 중...")
-    dataset = load_feature_extraction_dataset()
+    dataset = load_dataset("yainage90/restaurant-feature-extraction-dataset", split="train")
     
     # 2. 모델과 토크나이저 설정
     print("\n2. 모델과 토크나이저 설정 중...")
@@ -185,7 +185,7 @@ def main():
         bf16=True if torch_dtype == torch.bfloat16 else False,
         max_grad_norm=0.3,
         warmup_ratio=0.03,
-        lr_scheduler_type="cosine",
+        lr_scheduler_type="linear",
         gradient_checkpointing=True,
         report_to="wandb",
         eval_strategy="epoch",
@@ -219,12 +219,7 @@ def main():
     
     # 7. 훈련 시작
     print("\n7. 훈련 시작...")
-    trainer.train(resume_from_checkpoint=True)
-    
-    # 8. 모델 저장
-    print("\n8. 모델 저장 중...")
-    trainer.save_model()
-    tokenizer.save_pretrained(output_dir)
+    trainer.train(resume_from_checkpoint=False)
     
     print("\n=== 파인튜닝 완료! ===")
 

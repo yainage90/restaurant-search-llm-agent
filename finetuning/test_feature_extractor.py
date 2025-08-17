@@ -1,232 +1,247 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-Gemma 3 1B IT 모델을 QLoRA 방식으로 파인튜닝하는 스크립트
-데이터셋: data/feature_extraction_instruction_dataset/*.jsonl
-모델: google/gemma-3-1b-it
+파인튜닝된 Gemma 3 1B IT 모델을 사용한 추론 테스트 스크립트
 
 실행 방법:
     export HF_TOKEN=<huggingface access token>
-    export WANDB_API_KEY=<wandb api key>
-    export HF_HOME=<huggingface cache directory>
-    uv run python app/scripts/train_feature_extraction_model.py
+    uv run python finetuning/inference.py
 """
 
 import os
-from pathlib import Path
+import json
+import random
 import torch
-from datasets import Dataset, load_dataset, concatenate_datasets
-from transformers import (
-    AutoTokenizer, 
-    AutoModelForCausalLM, 
-    BitsAndBytesConfig,
-)
-from peft import LoraConfig, get_peft_model, TaskType, prepare_model_for_kbit_training
-from trl import SFTTrainer, SFTConfig
-import wandb
+from dotenv import load_dotenv
+from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
+from peft import PeftModel
 
+load_dotenv()
 
-def load_feature_extraction_dataset() -> Dataset:
-    """feature_extraction_instruction_dataset 로드"""
-
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    dataset_path = f"{BASE_DIR}/../data/feature_extraction_instruction_dataset"
+def load_fine_tuned_model(adapter_path: str):
+    """파인튜닝된 모델과 토크나이저 로드"""
     
-    data_files = []
-    dataset_dir = Path(dataset_path)
+    # 베이스 모델 설정
+    base_model_id = "google/gemma-3-1b-it"
     
-    if not dataset_dir.exists():
-        raise ValueError(f"데이터셋 경로가 존재하지 않습니다: {dataset_path}")
-    
-    # jsonl 파일들 찾기
-    for file_path in dataset_dir.glob("*.jsonl"):
-        data_files.append(str(file_path))
-    
-    if not data_files:
-        raise ValueError(f"데이터셋 파일이 없습니다: {dataset_path}")
-    
-    print(f"로드할 데이터 파일: {len(data_files)}개")
-    
-    # 모든 jsonl 파일 로드하고 합치기
-    datasets = []
-    for file_path in data_files:
-        dataset = load_dataset("json", data_files=file_path, split="train")
-        datasets.append(dataset)
-    
-    # 데이터셋들을 하나로 합치기
-    combined_dataset = concatenate_datasets(datasets)
-    print(f"총 데이터 개수: {len(combined_dataset)}")
-    
-    return combined_dataset
-
-
-def format_dataset(dataset: Dataset, tokenizer: AutoTokenizer) -> Dataset:
-    """
-    데이터셋을 모델 훈련에 적합한 형식으로 변환합니다.
-    Gemma의 채팅 템플릿을 사용하여 메시지를 단일 텍스트 필드로 변환합니다.
-    """
-    
-    def format_chat_template(example):
-        messages = example["messages"]
-        messages = [m for m in messages if m["role"] != "system"]
-        text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
-        # EOS 토큰이 없으면 추가
-        if not text.endswith(tokenizer.eos_token):
-            text = text.strip() + tokenizer.eos_token
-            
-        return {"text": text}
-
-    return dataset.map(format_chat_template, remove_columns=dataset.column_names, batched=False)
-
-
-def setup_model_and_tokenizer(model_id, torch_dtype, attn_implementation):
-    """모델과 토크나이저 설정"""
-    
-    # QLoRA 설정
+    # QLoRA 설정 (추론용)
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_use_double_quant=True,
         bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch_dtype,
+        bnb_4bit_compute_dtype=torch.bfloat16,
     )
-
+    
     # 토크나이저 로드
-    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    tokenizer = AutoTokenizer.from_pretrained(base_model_id)
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
     
-    # 모델 로드
-    model = AutoModelForCausalLM.from_pretrained(
-        model_id,
-        attn_implementation=attn_implementation,
-        torch_dtype=torch_dtype, # QLoRA 사용 시 bnb_4bit_compute_dtype으로 지정
+    # 베이스 모델 로드
+    base_model = AutoModelForCausalLM.from_pretrained(
+        base_model_id,
+        torch_dtype=torch.bfloat16,
         device_map="auto",
         quantization_config=bnb_config,
     )
-    model.config.use_cache = False
+    
+    # PEFT 어댑터 로드
+    model = PeftModel.from_pretrained(base_model, adapter_path)
+    model.eval()
 
-    
-    # k-bit 훈련을 위한 모델 준비 (QLoRA 사용 시)
-    # model = prepare_model_for_kbit_training(model)
-    
-    # PEFT 모델 적용
-    # model = get_peft_model(model, peft_config)
-    # model.print_trainable_parameters()
+    print(f"device: {model.device}")
     
     return model, tokenizer
-                
+
+
+def generate_response(model, tokenizer, prompt: str) -> str:
+    """모델을 사용하여 응답 생성"""
+    
+    # 메시지 형태로 변환
+    messages = [
+        {
+            "role": "system",
+            "content": """당신은 주어진 식당 정보(소개글, 리뷰)에서 핵심 키워드를 정확하게 추출하는 맛집 데이터 분석가입니다.
+추출된 정보는 식당 검색 시스템의 성능을 높이는 데 사용됩니다."""
+        },
+        {
+            "role": "user",
+            "content": prompt
+        }
+    ]
+    
+    # 채팅 템플릿 적용
+    chat_prompt = tokenizer.apply_chat_template(
+        messages, 
+        tokenize=False, 
+        add_generation_prompt=True
+    )
+    
+    # 토크나이징
+    inputs = tokenizer(
+        chat_prompt,
+        return_tensors="pt",
+        padding=True,
+        truncation=True,
+        max_length=4096,
+    ).to(model.device)
+    
+    # 생성
+    with torch.no_grad():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=1024,
+            do_sample=False,
+            pad_token_id=tokenizer.eos_token_id,
+            eos_token_id=tokenizer.eos_token_id,
+        )
+    
+    # 응답 디코딩 (입력 프롬프트 제외)
+    response = tokenizer.decode(
+        outputs[0][inputs.input_ids.shape[-1]:], 
+        skip_special_tokens=True
+    )
+    
+    return response.strip()
+
+
+def load_random_restaurant_data():
+    """data/crawled_restaurants/part-00030.jsonl에서 랜덤한 레스토랑 데이터 로드"""
+    
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    data_path = os.path.join(BASE_DIR, "../data/crawled_restaurants/part-00030.jsonl")
+    
+    if not os.path.exists(data_path):
+        print(f"❌ 데이터 파일이 존재하지 않습니다: {data_path}")
+        return None
+    
+    # 파일의 전체 라인 수 계산
+    with open(data_path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+    
+    if not lines:
+        print("❌ 데이터 파일이 비어있습니다")
+        return None
+    
+    # 랜덤 라인 선택
+    random_line = random.choice(lines)
+    restaurant_data = json.loads(random_line)
+    
+    return restaurant_data
+
+
+def test_feature_extraction(model, tokenizer):
+    """특징 추출 테스트"""
+    
+    # 랜덤 레스토랑 데이터 로드
+    restaurant_data = load_random_restaurant_data()
+    if not restaurant_data:
+        return None
+    
+    description = restaurant_data.get("description", "")
+    reviews = restaurant_data.get("reviews", [])
+    
+    # 리뷰를 \n으로 이어붙이기
+    reviews_text = "\n".join(reviews[:30])
+    
+    print("=== 선택된 레스토랑 데이터 ===")
+    print(f"레스토랑명: {restaurant_data.get('title', 'N/A')}")
+    print(f"설명: {description[:100]}...")
+    print(f"리뷰 개수: {len(reviews)}개")
+    print(f"리뷰 텍스트 길이: {len(reviews_text)} 문자")
+    print("\n" + "="*50)
+    
+    test_prompt = f"""식당 소개글과 사용자 리뷰에서 아래 각 항목에 해당하는 특징 키워드가 있으면 추출해주세요.
+1. `review_food`: 리뷰에서 언급된 메뉴나 음식 키워드  (예: 파스타, 스테이크, 떡볶이)
+2. `convenience`: 식당에서 제공하는 긍정적인 편의 및 서비스 (예: 주차, 발렛, 배달, 포장, 예약, 룸, 콜키지, 반려동물, 와이파이, 24시, 구워줌)
+3. `atmosphere`: 분위기 (예: 이국적인, 로맨틱한, 뷰맛집, 노포, 조용한, 시끌벅적한)
+4. `occasion`: 방문 목적 (예: 데이트, 기념일, 회식, 단체, 혼밥, 혼술)
+5. `features`: 기타 특징 (예: 넓은공간, 가성비)
+
+**중요: 반드시 유효한 JSON 형식으로만 응답하세요. 추가적인 설명이나 마크다운은 포함하지 마세요.**
+
+**추출 가이드라인:**
+- 각 항목에 대해 10개 이하의 핵심 키워드를 추출합니다.
+- 여러 리뷰에서 공통적으로 언급되는 내용을 우선적으로 고려합니다.
+- '인생'이 들어가는 키워드는 추출하지 마세요.
+- 절대로 같은 키워드를 중복해서 생성하지 마세요.
+- 부정적인 내용은 편의 기능이 아님: '직접 구워먹어야 함'이나 '주차 공간 없음'과 같이 고객에게 불편을 주거나, 식당에서 제공하지 않는 서비스는 `convenience` 항목에 절대 포함하지 마세요.
+- 리뷰나 소개글에 명시적으로 언급된 단어만으로 키워드를 추출하세요. 예를 들어 '전화하고 방문'을 '예약'으로 해석하는 것처럼 문맥을 확장하여 추론하지 마세요.
+- 모든 키워드를 종합하여 중복을 제거해주세요.
+- 항목에 키워드가 없다면 빈 배열 []을 반환하세요.
+- 식당 소개글에서 메뉴는 제외 해주세요. 다른 특징만 추출하세요.
+
+**JSON 형식:**
+{{
+    "review_food": list,
+    "convenience": list,
+    "atmosphere": list,
+    "occasion": list,
+    "features": list,
+}}
+
+위 가이드라인과 예시를 참고하여, 아래의 실제 입력 데이터에서 특징을 추출하세요.
+
+식당 소개글:
+{description}
+
+사용자 리뷰:
+{reviews_text}
+"""
+    
+    print("=== 특징 추출 테스트 ===")
+    print(f"입력 프롬프트 길이: {len(test_prompt)} 문자")
+    print("\n" + "="*50)
+    
+    response = generate_response(model, tokenizer, test_prompt)
+    
+    print("모델 응답:")
+    print(response)
+    print("\n" + "="*50)
+    
+    # JSON 파싱 시도
+    try:
+        result_json = json.loads(response)
+        print("JSON 파싱 성공!")
+        print(json.dumps(result_json, ensure_ascii=False, indent=2))
+        return result_json
+    except json.JSONDecodeError as e:
+        print(f"JSON 파싱 실패: {e}")
+        print("원본 응답을 다시 확인해보세요.")
+        return None
+
+
 def main():
     """메인 실행 함수"""
     
-    # 시드 설정
-    torch.manual_seed(42)
-
-    print("=== Gemma 3 QLoRA 파인튜닝 시작 ===")
-
-    # 1. 데이터셋 로드
-    print("\n1. 데이터셋 로드 중...")
-    dataset = load_feature_extraction_dataset()
+    adapter_path = "yainage90/restaurant-feature-extractor"
+    print(adapter_path)
     
-    # 2. 모델과 토크나이저 설정
-    print("\n2. 모델과 토크나이저 설정 중...")
-
-    # Check if GPU benefits from bfloat16
-    if torch.cuda.get_device_capability()[0] >= 8:
-        torch_dtype = torch.bfloat16
-        attn_implementation = "flash_attention_2"
-    else:
-        torch_dtype = torch.float16
-        attn_implementation = "eager"
-
-    print(f"torch_dtype: {torch_dtype}")
-    print(f"attn_implementation: {attn_implementation}")
-
-    model_id = "google/gemma-3-1b-it"
+    # Hugging Face Hub에서 직접 불러오므로 경로 존재 확인 생략
     
-    model, tokenizer = setup_model_and_tokenizer(model_id=model_id, torch_dtype=torch_dtype, attn_implementation=attn_implementation)
-        
-    # 3. 데이터 포맷팅
-    print("\n3. 데이터 포맷팅 중...")
-    formatted_dataset = format_dataset(dataset, tokenizer)
+    print("=== 파인튜닝된 Gemma 3 모델 추론 테스트 ===")
     
-    # 4. 훈련/검증 분할
-    print("\n4. 데이터 분할 중...")
-    split_dataset = formatted_dataset.train_test_split(test_size=0.1, seed=42)
-    train_dataset = split_dataset["train"]
-    eval_dataset = split_dataset["test"]
+    # 1. 모델 로드
+    print("\n1. 모델 로드 중...")
+    try:
+        model, tokenizer = load_fine_tuned_model(adapter_path)
+        print("✅ 모델 로드 완료")
+    except Exception as e:
+        print(f"❌ 모델 로드 실패: {e}")
+        return
     
-    print(f"훈련 데이터: {len(train_dataset)}개")
-    print(f"검증 데이터: {len(eval_dataset)}개")
-
-    print(f"{'-' * 30}데이터 샘플{'-' * 30}")
-    print(f"{train_dataset[0]}")
-
-    # 출력 디렉토리 생성
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    output_dir = f"{BASE_DIR}/models/feature_extractor/{model_id}"
-    os.makedirs(output_dir, exist_ok=True)
-
-    wandb.init(project=f"restaurant-feature-extractor-gemma-3-1b-it")
+    # 2. 특징 추출 테스트
+    print("\n2. 특징 추출 테스트 시작...")
+    try:
+        result = test_feature_extraction(model, tokenizer)
+        if result:
+            print("✅ 테스트 완료 - JSON 파싱 성공")
+        else:
+            print("⚠️ 테스트 완료 - JSON 파싱 실패")
+    except Exception as e:
+        print(f"❌ 테스트 실패: {e}")
     
-    # 5. 훈련 설정
-    print("\n5. 훈련 설정 중...")
-    training_args = SFTConfig(
-        output_dir=output_dir,
-        max_length=4096,
-        packing=True,
-        num_train_epochs=2,
-        per_device_train_batch_size=1,
-        per_device_eval_batch_size=1,
-        gradient_accumulation_steps=4,
-        optim="adamw_torch_fused",
-        logging_steps=10,
-        learning_rate=2e-4,
-        weight_decay=0.001,
-        fp16=True if torch_dtype == torch.float16 else False,
-        bf16=True if torch_dtype == torch.bfloat16 else False,
-        max_grad_norm=0.3,
-        warmup_ratio=0.03,
-        lr_scheduler_type="cosine",
-        gradient_checkpointing=True,
-        report_to="wandb",
-        eval_strategy="epoch",
-        save_strategy="epoch",
-        metric_for_best_model="eval_loss",
-        save_total_limit=2,
-        seed=42,
-        data_seed=42,
-    )
-
-    # LoRA 설정
-    peft_config = LoraConfig(
-        lora_alpha=16,
-        lora_dropout=0.05,
-        r=16,
-        bias="none",
-        target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
-        task_type=TaskType.CAUSAL_LM,
-    )
-    
-    # 6. 트레이너 설정
-    print("\n6. 트레이너 설정 중...")
-    trainer = SFTTrainer(
-        model=model,
-        args=training_args,
-        train_dataset=train_dataset,
-        eval_dataset=eval_dataset,
-        processing_class=tokenizer,
-        peft_config=peft_config,
-    )
-    
-    # 7. 훈련 시작
-    print("\n7. 훈련 시작...")
-    trainer.train(resume_from_checkpoint=True)
-    
-    # 8. 모델 저장
-    print("\n8. 모델 저장 중...")
-    trainer.save_model()
-    tokenizer.save_pretrained(output_dir)
-    
-    print("\n=== 파인튜닝 완료! ===")
+    print("\n=== 추론 테스트 완료 ===")
 
 
 if __name__ == "__main__":
