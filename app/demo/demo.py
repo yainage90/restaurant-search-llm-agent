@@ -6,12 +6,12 @@
 import gradio as gr
 from dotenv import load_dotenv
 from typing import Optional
-from ..retrieve.search import search, search_restaurants
-from ..generation.generation import generate
-from ..retrieve.relevance import grade_relevance
-from .config import config, ui_messages
-from .session import SessionManager
-from .utils import (
+from app.retrieve.search import search, search_restaurants
+from app.generation.generation import generate
+from app.retrieve.relevance import grade_relevance
+from app.demo.config import config, ui_messages
+from app.demo.session import SessionManager
+from app.demo.utils import (
     handle_exceptions, 
     parse_json_response, 
     safe_format_json, 
@@ -19,7 +19,7 @@ from .utils import (
     create_session_id,
     generate_decision
 )
-from .ui_components import (
+from app.demo.ui_components import (
     create_chat_interface,
     create_admin_dashboard
 )
@@ -268,88 +268,89 @@ def test_nlu_module(query: str) -> str:
 @handle_exceptions(default_return=("", "", ""))
 def test_search_module(query: str) -> tuple[str, str, str]:
     """검색 모듈 전체 파이프라인 테스트"""
-    from ..retrieve.nlu import classify_intent_and_extract_entities
-    from ..retrieve.embeddings import get_query_embedding
-    from ..retrieve.search import (
-        build_general_search_query, 
-        build_compare_search_queries, 
-        build_information_search_query,
-        elasticsearch_search
+    from app.retrieve.nlu import classify_intent_and_extract_entities
+    from app.retrieve.hybrid_search import (
+        hybrid_search, 
+        build_bm25_query, 
+        build_vector_query
     )
+    from app.retrieve.embeddings import get_query_embedding
+    from app.retrieve.search import search_restaurants_by_intent
     
     # 1. NLU 분석
     nlu_result = classify_intent_and_extract_entities(query)
     intent = nlu_result.get("intent", "search")
     entities = nlu_result.get("entities", {})
     
-    # 2. 임베딩 생성 
-    query_embedding = get_query_embedding([query])
-    # 벡터는 너무 길어서 요약 표시
-    embedding_summary = f"[{len(query_embedding)}차원 벡터]" if query_embedding else "임베딩 없음"
-    
-    # 3. Elasticsearch 쿼리 생성 및 검색 실행
-    if intent == "compare":
-        # compare일 때는 각 쿼리별로 구분해서 처리
-        es_queries = build_compare_search_queries(entities, query_embedding)
-        
-        # 각 쿼리에서 벡터를 요약으로 대체
-        display_queries = []
-        search_results_by_query = []
-        
-        for i, es_query in enumerate(es_queries):
-            # 쿼리 복사본 만들어서 벡터 요약으로 대체
-            import copy
-            display_query_copy = copy.deepcopy(es_query)
-            if "knn" in display_query_copy:
-                display_query_copy["knn"]["query_vector"] = embedding_summary
-            display_queries.append(f"=== 쿼리 {i+1} ===\n{safe_format_json(display_query_copy)}")
-            
-            # 각 쿼리 개별 실행
-            query_results = elasticsearch_search(es_query)
-            results_text = f"=== 쿼리 {i+1} 검색 결과 ({len(query_results)}개) ===\n"
-            for j, result in enumerate(query_results, 1):
-                summary = result.get("summary", "N/A")
-                score = result.get("_score", "N/A")
-                results_text += f"{j}. (점수: {score})\n{summary}\n\n"
-            search_results_by_query.append(results_text)
-        
-        # 출력 포맷팅
-        nlu_str = safe_format_json(nlu_result)
-        es_query_str = "\n\n".join(display_queries)
-        search_results_text = "\n\n".join(search_results_by_query)
-        
+    # 2. 검색 크기 결정
+    if intent == "search":
+        size = 5
+    elif intent == "compare":
+        size = 8
+    elif intent == "information":
+        size = 3
     else:
-        # search, information intent의 기존 로직
-        if intent == "search":
-            es_query = build_general_search_query(entities, query_embedding)
-        elif intent == "information":
-            es_query = build_information_search_query(entities, query_embedding)
-        else:
-            es_query = build_general_search_query(entities, query_embedding)
+        size = 5
+    
+    # 3. Elasticsearch 쿼리 생성 (표시용)
+    search_size = max(50, size * 10)
+    
+    # BM25 쿼리 생성
+    bm25_query = build_bm25_query(query, entities, intent, search_size)
+    
+    # 벡터 쿼리 생성
+    query_embedding = get_query_embedding([query])
+    vector_query = build_vector_query(query_embedding, entities, search_size)
+    
+    # 벡터 요약으로 대체 (출력용)
+    import copy
+    display_vector_query = copy.deepcopy(vector_query)
+    embedding_summary = f"[{len(query_embedding)}차원 벡터]" if query_embedding else "임베딩 없음"
+    if "knn" in display_vector_query:
+        display_vector_query["knn"]["query_vector"] = embedding_summary
+    
+    # 4. 연관도 필터링을 포함한 최종 검색 실행
+    final_results = search_restaurants_by_intent(intent, entities, query)
+    
+    # 출력 포맷팅
+    nlu_str = safe_format_json(nlu_result)
+    
+    # Elasticsearch 쿼리 정보
+    es_queries = {
+        "BM25_쿼리": bm25_query,
+        "벡터_쿼리": display_vector_query,
+        "검색_크기": search_size,
+        "검색_의도": intent
+    }
+    es_query_str = safe_format_json(es_queries)
+    
+    # 최종 검색 결과
+    search_results_text = ""
+    for i, result in enumerate(final_results, 1):
+        title = result.get("title", "제목 없음")
+        summary = result.get("summary", "N/A")
         
-        # 벡터 요약으로 대체
-        es_query["knn"]["query_vector"] = embedding_summary
+        # 하이브리드 검색 점수 정보 표시
+        rrf_score = result.get("rrf_score", "N/A")
+        search_method = result.get("search_method", "N/A")
+        bm25_rank = result.get("bm25_rank", "N/A")
+        vector_rank = result.get("vector_rank", "N/A")
         
-        # 검색 실행
-        results = search_restaurants(query)
-        
-        # 출력 포맷팅
-        nlu_str = safe_format_json(nlu_result)
-        es_query_str = safe_format_json(es_query)
-        
-        # 검색 결과 - 요약만 표시
-        search_results_text = ""
-        for i, result in enumerate(results, 1):
-            summary = result.get("summary", "N/A")
-            score = result.get("_score", "N/A")
-            
-            search_results_text += f"{i}. (점수: {score})\n"
-            search_results_text += f"{summary}\n\n"
+        search_results_text += f"{i}. {title}\n"
+        search_results_text += f"   RRF점수: {rrf_score}, 방법: {search_method}\n"
+        if bm25_rank != "N/A":
+            search_results_text += f"   BM25 순위: {bm25_rank}\n"
+        if vector_rank != "N/A":
+            search_results_text += f"   벡터 순위: {vector_rank}\n"
+        search_results_text += f"   요약: {summary}\n\n"
+    
+    if not search_results_text:
+        search_results_text = "검색 결과가 없습니다."
     
     return (
         f"NLU 분석 결과:\n{nlu_str}\n\n",
         f"Elasticsearch 쿼리:\n{es_query_str}",
-        f"검색 결과:\n\n{search_results_text}"
+        f"최종 검색 결과:\n\n{search_results_text}"
     )
 
 
