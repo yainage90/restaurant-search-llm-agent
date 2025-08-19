@@ -102,14 +102,15 @@ flowchart TD
     Compare Search]
     P -.->|"information"| H3[정보 검색
     Information Search]
-    H1 --> I[연관도 평가
-    Relevance Evaluation]
-    H2 --> I
-    H3 --> I
-    I --> N{연관성 판단}
-    N -.->|"relevant"| J[세션 컨텍스트 업데이트
+    H1 --> RRF[RRF 랭킹 조합
+    BM25 + Vector Search Fusion]
+    H2 --> RRF
+    H3 --> RRF
+    RRF --> I{연관도 평가 및 판단
+    Relevance Evaluation}
+    I -.->|"relevant"| J[세션 컨텍스트 업데이트
     Update Session Context]
-    N -.->|"irrelevant"| O[웹 검색
+    I -.->|"irrelevant"| O[웹 검색
     Web Search]
     O --> J
     J --> K[응답 생성
@@ -161,23 +162,24 @@ NLU 결과에 따라 적절한 검색 전략을 선택하는 분기점이다.
 
 ### 8. 일반 검색(General Search)
 
-포괄적인 맛집 검색을 위한 전략으로, 추출된 모든 엔티티를 활용한다. 지역 필터, 카테고리 필터, 메뉴 필터, 편의시설 필터를 적용하여 3개 문서를 검색한다.
+포괄적인 맛집 검색을 위한 전략으로, 추출된 모든 엔티티를 활용한다. BM25 키워드 검색과 벡터 검색을 병행하여 지역 필터, 카테고리 필터, 메뉴 필터, 편의시설 필터를 적용하여 3개 문서를 검색한다.
 
 ### 9. 비교 검색(Compare Search)
 
-여러 식당을 비교하기 위한 전략으로, 각 식당명에 대해 개별 쿼리를 실행한다. 각 쿼리당 2개씩 문서를 검색하여 비교 대상을 확보하고 중복을 제거한다.
+여러 식당을 비교하기 위한 전략으로, 각 식당명에 대해 개별 BM25 + 벡터 하이브리드 쿼리를 실행한다. 각 쿼리당 2개씩 문서를 검색하여 비교 대상을 확보하고 중복을 제거한다.
 
 ### 10. 정보 검색(Information Search)
 
-특정 식당에 대한 상세 정보를 제공하기 위한 전략이다. 식당명이 있는 경우 정확한 매칭을 우선하고, 지역만 있는 경우 더 많은 결과(5개)를 반환한다.
+특정 식당에 대한 상세 정보를 제공하기 위한 전략이다. BM25 키워드 매칭과 벡터 검색을 결합하여 식당명이 있는 경우 정확한 매칭을 우선하고, 지역만 있는 경우 더 많은 결과(5개)를 반환한다.
 
-### 11. 연관도 평가(Relevance Evaluation)
+### 11. RRF 랭킹 조합(Reciprocal Rank Fusion)
 
-검색된 문서들이 사용자 질의에 얼마나 관련성이 있는지 LLM을 사용해 평가하는 단계이다. Gemini 2.5 Flash Lite로 각 문서를 'relevant'/'irrelevant'로 판단하여 관련성이 높은 문서만 필터링한다.
+BM25 키워드 검색과 벡터 검색 결과를 RRF(Reciprocal Rank Fusion) 알고리즘을 사용하여 최종 랭킹을 결정하는 단계이다. 비교 검색의 경우 각 식당별로 개별적으로 RRF를 적용한 후 결과를 합치며, 모든 검색에서 각 식당의 최소 결과 수를 보장한다.
 
-### 12. 연관성 판단
+### 12. 연관도 평가 및 판단(Relevance Evaluation)
 
-연관도 평가 결과에 따라 다음 단계를 결정하는 분기점이다.
+검색된 문서들이 사용자 질의에 얼마나 관련성이 있는지 LLM을 사용해 평가하고 다음 단계를 결정하는 분기점이다. Gemini 2.5 Flash Lite로 각 문서를 'relevant'/'irrelevant'로 판단하여 관련성이 높은 문서만 필터링한다.
+
 - **relevant**: 관련성이 높은 문서들이 발견된 경우 → 세션 컨텍스트 업데이트로 진행
 - **irrelevant**: 모든 문서가 관련성이 낮은 경우 → 웹 검색으로 대체
 
@@ -469,43 +471,59 @@ NLU 모듈에서 분류된 의도에 따라 다른 검색 전략을 적용한다
 }
 ```
 
-3. 최종 Elasticsearch 쿼리:
+3. 최종 Elasticsearch 하이브리드 쿼리 (BM25 + 벡터):
 ```python
 {
-    "knn": {
-        "field": "embedding",
-        "query_vector": embedding,
-        "k": 3,
-        "num_candidates": 100,
-        "filter": [
-            {
-                "geo_distance": {
-                    "distance": "3km",
-                    "pin.coordinate": {
-                        "lat": 37.497952,  # 강남역 위도
-                        "lon": 127.027619  # 강남역 경도
-                    }
-                }
-            },
-            {
-                "match": {
-                    "convenience": {
-                        "query": "주차",
-                        "operator": "and"
-                    }
-                }
-            },
-            {
-                "match": {
-                    "category": {
-                        "query": "일식",
-                        "operator": "and"
-                    }
+    "sub_searches": [
+        {
+            "query": {
+                "bool": {
+                    "must": [
+                        {"match": {"summary": "강남역 주차 일식"}},
+                        {"match": {"convenience": "주차"}},
+                        {"match": {"category": "일식"}}
+                    ],
+                    "filter": [
+                        {
+                            "geo_distance": {
+                                "distance": "3km", 
+                                "pin.coordinate": {
+                                    "lat": 37.497952,
+                                    "lon": 127.027619
+                                }
+                            }
+                        }
+                    ]
                 }
             }
-        ]
-    },
-    "size": 3
+        },
+        {
+            "query": {
+                "knn": {
+                    "field": "embedding",
+                    "query_vector": embedding,
+                    "k": 3,
+                    "num_candidates": 100,
+                    "filter": [
+                        {
+                            "geo_distance": {
+                                "distance": "3km",
+                                "pin.coordinate": {
+                                    "lat": 37.497952,
+                                    "lon": 127.027619
+                                }
+                            }
+                        },
+                        {"match": {"convenience": "주차"}},
+                        {"match": {"category": "일식"}}
+                    ]
+                }
+            }
+        }
+    ],
+    "rank": {
+        "rrf": {}
+    }
 }
 ```
 
@@ -513,20 +531,21 @@ NLU 모듈에서 분류된 의도에 따라 다른 검색 전략을 적용한다
 
 # 7. 벡터 데이터베이스 및 검색 시스템
 
-NLU 기반 의도별 검색과 LLM 연관성 평가가 통합된 하이브리드 검색 시스템을 구현한다.
+NLU 기반 의도별 검색과 LLM 연관성 평가가 통합된 BM25 + 벡터 하이브리드 검색 시스템을 구현한다.
 
 ### Elasticsearch 선택 이유
-- 키워드 매칭, 필터링, 벡터 검색을 모두 지원하는 통합 플랫폼
+- BM25 키워드 매칭, 필터링, KNN 벡터 검색을 모두 지원하는 통합 플랫폼
 - 지리 기반 검색(geo_distance)으로 위치 중심 맛집 검색 가능
-- 의도별로 다른 검색 전략을 유연하게 구현 가능
-- KNN 벡터 검색과 필터 조건을 결합한 복합 쿼리 지원
+- 의도별로 다른 하이브리드 검색 전략을 유연하게 구현 가능
+- BM25와 KNN 벡터 검색 결과를 RRF로 조합하는 복합 쿼리 지원
 
 ### 검색 파이프라인
 1. **NLU 처리**: 자연어 → 의도분류 + 엔티티추출
-2. **전략 선택**: 의도별 검색 전략 (search/compare/information)
-3. **쿼리 생성**: 엔티티 기반 Elasticsearch 쿼리 구성
-4. **검색 실행**: 벡터 유사도 + 키워드 필터링 통합 검색
-5. **연관성 평가**: LLM으로 검색 결과의 관련성 판단 및 필터링
+2. **전략 선택**: 의도별 하이브리드 검색 전략 (search/compare/information)
+3. **쿼리 생성**: 엔티티 기반 BM25 + KNN 벡터 Elasticsearch 쿼리 구성
+4. **검색 실행**: BM25 키워드 매칭 + KNN 벡터 유사도 + 필터링 통합 검색
+5. **RRF 조합**: BM25와 벡터 검색 결과를 RRF로 최종 랭킹 결정
+6. **연관성 평가**: LLM으로 검색 결과의 관련성 판단 및 필터링
 
 <br>
 
