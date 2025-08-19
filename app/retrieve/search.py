@@ -45,7 +45,7 @@ def filter_by_relevance(query: str, results: list[dict[str, Any]]) -> list[dict[
 
 
 # 메인 검색 함수들
-def search_restaurants_by_intent(intent: str, entities: dict[str, Any], query: str) -> list[dict[str, Any]]:
+def search_restaurants_by_intent(intent: str, entities: dict[str, Any], suggested_queries: list[str], original_query: str) -> list[dict[str, Any]]:
     """의도에 따른 하이브리드 검색 실행"""
     
     # 검색 전략에 따라 결과 수 조정
@@ -59,14 +59,14 @@ def search_restaurants_by_intent(intent: str, entities: dict[str, Any], query: s
         print(f"지원하지 않는 검색 의도: {intent}")
         return []
     
-    # 하이브리드 검색 실행 (의도 전달)
-    results = hybrid_search(query, entities, intent, size)
+    # 하이브리드 검색 실행 (suggested_queries 사용)
+    results = hybrid_search(suggested_queries, entities, intent, size)
     
     print(f"{intent} 하이브리드 검색 완료: {len(results)}개 문서 발견")
     
-    # 연관도 판단 및 필터링
+    # 연관도 판단 및 필터링 (원본 쿼리로 평가)
     if results:
-        return filter_by_relevance(query, results)
+        return filter_by_relevance(original_query, results)
     
     return results
 
@@ -82,17 +82,19 @@ def search_restaurants(query: str) -> list[dict[str, Any]]:
         검색된 식당 문서 리스트
     """
     
-    # 1. 의도 분류 및 엔티티 추출
+    # 1. 의도 분류, 엔티티 추출, 쿼리 재정의
     intent_result = classify_intent_and_extract_entities(query)
     intent = intent_result["intent"]
     entities = intent_result["entities"]
+    suggested_queries = intent_result.get("suggested_queries", [query])
     
     print(f"쿼리: {query}")
     print(f"검색 의도: {intent}")
     print(f"추출된 엔티티: {entities}")
+    print(f"재정의된 쿼리: {suggested_queries}")
     
     # 2. 의도에 따른 검색 전략 실행
-    results = search_restaurants_by_intent(intent, entities, query)
+    results = search_restaurants_by_intent(intent, entities, suggested_queries, query)
     
     return results
 

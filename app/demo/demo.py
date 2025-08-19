@@ -34,8 +34,7 @@ session_manager = SessionManager()
 @handle_exceptions(
     default_return={
         "need_search": False, 
-        "reason": ui_messages.search_decision_error,
-        "suggested_query": ""
+        "reason": ui_messages.search_decision_error
     }
 )
 def should_perform_new_search(
@@ -69,7 +68,6 @@ def should_perform_new_search(
         chat_history_text = "최근 대화:\n"
         recent_chat = chat_history[-config.max_chat_history:]
         for user_msg, bot_msg in recent_chat:
-            # truncated_bot_msg = bot_msg[:500] + "..." if len(bot_msg) > 500 else bot_msg
             chat_history_text += f"사용자: {user_msg}\n"
             chat_history_text += f"어시스턴트: {bot_msg}\n"
     
@@ -95,8 +93,7 @@ def should_perform_new_search(
 응답 형식:
 {{
     "need_search": true/false,
-    "reason": "판단 근거를 한 문장으로",
-    "suggested_query": "새로운 검색이 필요한 경우 권장 검색 쿼리, 아니면 빈 문자열"
+    "reason": "판단 근거를 한 문장으로"
 }}"""
 
     response = generate_decision(prompt)
@@ -105,14 +102,12 @@ def should_perform_new_search(
     if "error" in parsed_result:
         return {
             "need_search": False,
-            "reason": parsed_result["error"],
-            "suggested_query": ""
+            "reason": parsed_result["error"]
         }
     
     return {
         "need_search": parsed_result.get("need_search", False),
-        "reason": parsed_result.get("reason", "판단 불가"),
-        "suggested_query": parsed_result.get("suggested_query", "")
+        "reason": parsed_result.get("reason", "판단 불가")
     }
 
 
@@ -187,8 +182,7 @@ def _handle_first_chat(message: str, session) -> str:
     
     if search_decision["need_search"]:
         # 검색이 필요한 경우
-        suggested_query = search_decision["suggested_query"] or message
-        return _perform_new_search(suggested_query, session)
+        return _perform_new_search(message, session)
     else:
         # 검색이 불필요한 경우 - 일반적인 응답 생성
         try:
@@ -207,14 +201,12 @@ def _handle_follow_up_chat(message: str, history: list[list[str]], session) -> s
     print(f'[Session {session.session_id}] 검색 필요성 판단: {search_decision}')
     
     if search_decision["need_search"]:
-        suggested_query = search_decision["suggested_query"] or message
-        
         # 중복 검색 방지
-        if is_similar_query(suggested_query, session.search_history):
+        if is_similar_query(message, session.search_history):
             print(f'[Session {session.session_id}] 유사한 검색으로 판단, 기존 컨텍스트 사용')
         else:
             # 새로운 검색 수행
-            return _perform_new_search(suggested_query, session)
+            return _perform_new_search(message, session)
     
     # 기존 컨텍스트로 응답 생성
     return _generate_context_response(message, history, session)
@@ -277,10 +269,11 @@ def test_search_module(query: str) -> tuple[str, str, str]:
     from app.retrieve.embeddings import get_query_embedding
     from app.retrieve.search import search_restaurants_by_intent
     
-    # 1. NLU 분석
+    # 1. NLU 분석 (새로운 suggested_queries 포함)
     nlu_result = classify_intent_and_extract_entities(query)
     intent = nlu_result.get("intent", "search")
     entities = nlu_result.get("entities", {})
+    suggested_queries = nlu_result.get("suggested_queries", [query])
     
     # 2. 검색 크기 결정
     if intent == "search":
@@ -292,14 +285,15 @@ def test_search_module(query: str) -> tuple[str, str, str]:
     else:
         size = 5
     
-    # 3. Elasticsearch 쿼리 생성 (표시용)
+    # 3. Elasticsearch 쿼리 생성 (표시용 - 첫 번째 suggested_query 사용)
+    display_query = suggested_queries[0] if suggested_queries else query
     search_size = max(50, size * 10)
     
     # BM25 쿼리 생성
-    bm25_query = build_bm25_query(query, entities, intent, search_size)
+    bm25_query = build_bm25_query(display_query, entities, intent, search_size)
     
     # 벡터 쿼리 생성
-    query_embedding = get_query_embedding([query])
+    query_embedding = get_query_embedding([display_query])
     vector_query = build_vector_query(query_embedding, entities, search_size)
     
     # 벡터 요약으로 대체 (출력용)
@@ -310,7 +304,7 @@ def test_search_module(query: str) -> tuple[str, str, str]:
         display_vector_query["knn"]["query_vector"] = embedding_summary
     
     # 4. 연관도 필터링을 포함한 최종 검색 실행
-    final_results = search_restaurants_by_intent(intent, entities, query)
+    final_results = search_restaurants_by_intent(intent, entities, suggested_queries)
     
     # 출력 포맷팅
     nlu_str = safe_format_json(nlu_result)
@@ -320,7 +314,8 @@ def test_search_module(query: str) -> tuple[str, str, str]:
         "BM25_쿼리": bm25_query,
         "벡터_쿼리": display_vector_query,
         "검색_크기": search_size,
-        "검색_의도": intent
+        "검색_의도": intent,
+        "사용된_쿼리들": suggested_queries
     }
     es_query_str = safe_format_json(es_queries)
     

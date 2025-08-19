@@ -203,7 +203,7 @@ BM25 키워드 검색과 벡터 검색 결과를 RRF(Reciprocal Rank Fusion) 알
 
 # 4. 의도 탐지 및 개체명 인식(Intent Classification & Entity Extraction)
 
-자연어 쿼리에서 검색 의도를 분류하고 필요한 엔티티를 추출하는 NLU(Natural Language Understanding) 단계이다. Gemini 2.5 Flash Lite 모델을 사용하여 구조화된 JSON 형태로 결과를 생성한다.
+자연어 쿼리에서 검색 의도를 분류하고 필요한 엔티티를 추출한 후 검색에 최적화된 쿼리를 재정의하는 NLU(Natural Language Understanding) 단계이다. Gemini 2.5 Flash Lite 모델을 사용하여 구조화된 JSON 형태로 결과를 생성한다.
 
 ### 의도 분류
 
@@ -221,6 +221,13 @@ BM25 키워드 검색과 벡터 검색 결과를 RRF(Reciprocal Rank Fusion) 알
 - `atmosphere`: 분위기(예: 이국적인, 색다른, 로맨틱한)
 - `occasion`: 상황(예: 회식, 단체, 데이트, 혼밥, 가족)
 
+### 쿼리 재정의
+
+NLU는 엔티티 추출과 함께 검색에 최적화된 쿼리를 재정의한다:
+- `search`: 1개의 포괄적 검색 쿼리
+- `compare`: 각 비교 대상별 개별 쿼리 생성  
+- `information`: 1개의 정보 요청에 최적화된 쿼리
+
 ### NLU 처리 결과 예시
 
 > 예시 1) query: "강남역 주차되는 일식집"
@@ -232,7 +239,8 @@ BM25 키워드 검색과 벡터 검색 결과를 RRF(Reciprocal Rank Fusion) 알
     "location": ["강남역"],
     "category": ["일식"],
     "convenience": ["주차"]
-  }
+  },
+  "suggested_queries": ["강남역 일식 주차"]
 }
 ```
 
@@ -243,7 +251,8 @@ BM25 키워드 검색과 벡터 검색 결과를 RRF(Reciprocal Rank Fusion) 알
   "intent": "compare", 
   "entities": {
     "title": ["버거킹", "맥도날드"]
-  }
+  },
+  "suggested_queries": ["버거킹", "맥도날드"]
 }
 ```
 
@@ -256,7 +265,8 @@ BM25 키워드 검색과 벡터 검색 결과를 RRF(Reciprocal Rank Fusion) 알
     "location": ["마포"],
     "title": ["진대감"],
     "convenience": ["주차"]
-  }
+  },
+  "suggested_queries": ["마포 진대감 주차"]
 }
 ```
 
@@ -430,31 +440,38 @@ f"기타 특징: {','.join(features) if features else None}"
 
 # 6. 의도별 검색 전략
 
-NLU 모듈에서 분류된 의도에 따라 다른 검색 전략을 적용한다.
+NLU 모듈에서 분류된 의도와 재정의된 쿼리(`suggested_queries`)에 따라 다른 검색 전략을 적용한다.
 
 ### Search 의도
-일반적인 맛집 검색으로, 추출된 모든 엔티티를 활용하여 포괄적인 검색을 수행한다.
-- `location`: 지역 필터 (coordinates 인덱스에서 위도/경도 조회 후 geo_distance 쿼리)
-- `category`: 카테고리 필터 (정확한 매칭)
-- `menu`: 메뉴 필터 (메뉴명과 리뷰 음식에서 검색)
-- `convenience`: 편의시설 필터 (필수 조건)
-- `atmosphere`, `occasion`: 벡터 검색으로 의미적 유사도 반영
+일반적인 맛집 검색으로, 단일 포괄적 쿼리를 사용한다.
+- **쿼리 수**: 1개 (포괄적 검색 쿼리)
+- **검색 방식**: BM25 + 벡터 검색을 RRF로 조합
+- **엔티티 활용**:
+  - `location`: 지역 필터 (coordinates 인덱스에서 위도/경도 조회 후 geo_distance 쿼리)
+  - `category`: 카테고리 필터 (정확한 매칭)
+  - `menu`: 메뉴 필터 (메뉴명과 리뷰 음식에서 검색)
+  - `convenience`: 편의시설 필터 (필수 조건)
+  - `atmosphere`, `occasion`: 벡터 검색으로 의미적 유사도 반영
 
 ### Compare 의도  
-여러 식당을 비교하는 검색으로, 각 식당별로 개별 쿼리를 실행한다.
-- `title` 엔티티의 각 식당명에 대해 별도 검색 실행
-- 각 쿼리당 2개씩 문서 검색하여 비교 대상 확보
-- 중복 제거 후 최종 결과 반환
+여러 대상을 비교하는 검색으로, 각 대상별로 개별 쿼리를 실행한 후 균등하게 결과를 분배한다.
+- **쿼리 수**: 2개 이상 (각 비교 대상별 개별 쿼리)
+- **검색 방식**: 각 쿼리별로 BM25 + 벡터 검색 → RRF 조합 → 쿼리별 균등 분배
+- **특징**: 각 비교 대상당 최소 결과 수를 보장하여 균형잡힌 비교 가능
+- **예시**: "버거킹 vs 맥도날드" → ["버거킹", "맥도날드"] 각각 검색 후 결과 균등 분배
 
 ### Information 의도
 특정 식당에 대한 정보 요청으로, 정확한 매칭에 중점을 둔다.
-- `title`이 있는 경우: 해당 식당명으로 정확한 검색
-- `location`만 있는 경우: 지역 기반 검색으로 더 많은 결과(5개) 반환
+- **쿼리 수**: 1개 (정보 요청에 최적화된 쿼리)
+- **검색 방식**: BM25 + 벡터 검색을 RRF로 조합
+- **특징**: 식당명 정확 매칭 우선, 관련 정보 상세 제공
 
 ### 연관성 평가 및 필터링
-모든 검색 결과는 LLM 기반 연관성 평가를 거쳐 관련성이 높은 문서만 필터링된다.
-- Gemini 2.5 Flash Lite로 각 문서의 관련성을 'relevant'/'irrelevant'로 판단
-- 'relevant' 문서만 최종 결과로 반환
+모든 검색 결과는 **원본 쿼리**를 기준으로 LLM 기반 연관성 평가를 거쳐 관련성이 높은 문서만 필터링된다.
+- **평가 기준**: 원본 자연어 쿼리 (재정의된 쿼리가 아닌)
+- **평가 모델**: Gemini 2.5 Flash Lite
+- **판단 기준**: 각 문서의 관련성을 'relevant'/'irrelevant'로 판단
+- **결과**: 'relevant' 문서만 최종 결과로 반환
 
 ### 쿼리 처리 예시
 
@@ -467,7 +484,8 @@ NLU 모듈에서 분류된 의도에 따라 다른 검색 전략을 적용한다
     "location": ["강남역"],
     "category": ["일식"], 
     "convenience": ["주차"]
-  }
+  },
+  "suggested_queries": ["강남역 일식 주차 가능"]
 }
 ```
 

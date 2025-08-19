@@ -220,7 +220,7 @@ def build_compare_search_bm25_query(
     # location 필터는 적용하지 않음 (비교 대상 확장을 위해)
     
     if not final_bool_query:
-        query = {"must_not": {"match_all": {}}}
+        query = {"match_all": {}}
     else:
         query = {"bool": final_bool_query}
 
@@ -453,99 +453,73 @@ def reciprocal_rank_fusion(
     return final_results
 
 
-def execute_compare_hybrid_search(query_text: str, entities: dict[str, Any], size: int = 8) -> list[dict[str, Any]]:
-    """비교 검색용 하이브리드 검색 실행 (각 title별로 개별 검색하여 최소 1개씩 보장)"""
-    
-    titles = entities.get("title", [])
-    if not titles:
+def execute_multiple_query_search(queries: list[str], entities: dict[str, Any], intent: str = "search", size: int = 8) -> list[dict[str, Any]]:
+    """여러 쿼리로 각각 검색하여 결과 통합 (각 쿼리별로 RRF 적용 후 균등하게 섞기)"""
+    if not queries:
         return []
     
-    all_bm25_results = []
-    all_vector_results = []
+    query_results = []
     
-    # 각 title별로 개별 검색 실행
-    for title in titles:
-        # 개별 title용 entities 생성
-        individual_entities = entities.copy()
-        individual_entities["title"] = [title]
+    # 각 쿼리별로 개별 검색 + RRF 실행
+    for query in queries:
+        search_size = max(20, size // len(queries) * 2)  # 쿼리 개수에 따라 조정
         
-        # 개별 검색 실행
-        search_size = max(20, size // len(titles) * 2)  # title 개수에 따라 조정
+        print(f"'{query}' BM25 검색 실행 중... (상위 {search_size}개)")
+        bm25_results = execute_bm25_search(query, entities, intent, search_size)
         
-        print(f"'{title}' BM25 검색 실행 중... (상위 {search_size}개)")
-        bm25_results = execute_bm25_search(title, individual_entities, "compare", search_size)
+        print(f"'{query}' 벡터 검색 실행 중... (상위 {search_size}개)")
+        vector_results = execute_vector_search(query, entities, intent, search_size)
         
-        print(f"'{title}' 벡터 검색 실행 중... (상위 {search_size}개)")
-        vector_results = execute_vector_search(title, individual_entities, "compare", search_size)
-        
-        all_bm25_results.extend(bm25_results)
-        all_vector_results.extend(vector_results)
-        
-        print(f"'{title}' 검색 완료: BM25={len(bm25_results)}, Vector={len(vector_results)}")
+        # 해당 쿼리에 대해 RRF 적용
+        if bm25_results or vector_results:
+            query_rrf_results = reciprocal_rank_fusion(bm25_results, vector_results)
+            query_results.append({
+                'query': query,
+                'results': query_rrf_results
+            })
+            print(f"'{query}' RRF 완료: {len(query_rrf_results)}개")
+        else:
+            print(f"'{query}' 검색 결과 없음")
     
-    # 중복 제거 (place_id 기준)
-    def deduplicate_by_place_id(results):
-        seen_ids = set()
-        unique_results = []
-        for doc in results:
-            if doc["place_id"] not in seen_ids:
-                unique_results.append(doc)
-                seen_ids.add(doc["place_id"])
-        return unique_results
-    
-    all_bm25_results = deduplicate_by_place_id(all_bm25_results)
-    all_vector_results = deduplicate_by_place_id(all_vector_results)
-    
-    if not all_bm25_results and not all_vector_results:
-        print("비교 검색 결과가 없습니다.")
+    if not query_results:
+        print("모든 쿼리에서 검색 결과가 없습니다.")
         return []
     
-    print("비교 검색 RRF 재순위화 실행 중...")
-    final_results = reciprocal_rank_fusion(all_bm25_results, all_vector_results)
+    # 각 쿼리별 결과를 균등하게 섞기
+    results_per_query = max(1, size // len(query_results))
+    final_results = []
     
-    # 비교 검색에서는 각 title별로 균등하게 결과 분배
-    titles = entities.get("title", [])
-    balanced_results = []
-    results_per_title = max(1, size // len(titles))  # 각 title당 최소 1개씩
+    print(f"쿼리별 균등 분배: 각 쿼리당 {results_per_query}개씩")
     
-    title_counts = {title: 0 for title in titles}
-    
-    # 각 title별로 최소 개수 보장
-    for result in final_results:
-        result_title = result.get("title", "")
-        
-        # 해당 결과가 어떤 title에 매치되는지 확인
-        matched_title = None
-        for title in titles:
-            if title.lower() in result_title.lower():
-                matched_title = title
-                break
-        
-        if matched_title and title_counts[matched_title] < results_per_title:
-            balanced_results.append(result)
-            title_counts[matched_title] += 1
+    # 각 쿼리에서 최소 개수만큼 선택
+    for query_data in query_results:
+        query_name = query_data['query']
+        query_final_results = query_data['results'][:results_per_query]
+        final_results.extend(query_final_results)
+        print(f"'{query_name}': {len(query_final_results)}개 선택")
     
     # 남은 슬롯을 상위 결과로 채우기
-    remaining_slots = size - len(balanced_results)
-    for result in final_results:
-        if remaining_slots <= 0:
-            break
-        if result not in balanced_results:
-            balanced_results.append(result)
-            remaining_slots -= 1
+    remaining_slots = size - len(final_results)
+    if remaining_slots > 0:
+        for query_data in query_results:
+            for result in query_data['results']:
+                if remaining_slots <= 0:
+                    break
+                if result not in final_results:
+                    final_results.append(result)
+                    remaining_slots -= 1
     
-    print(f"비교 검색 완료: {len(balanced_results)}개 문서")
-    print(f"title별 분배: {title_counts}")
+    print(f"다중 쿼리 검색 완료: {len(final_results[:size])}개 문서")
     
-    return balanced_results[:size]
+    return final_results[:size]
 
 
-def hybrid_search(query_text: str, entities: dict[str, Any], intent: str = "search", size: int = 5) -> list[dict[str, Any]]:
+def hybrid_search(queries: list[str], entities: dict[str, Any], intent: str = "search", size: int = 5) -> list[dict[str, Any]]:
     """
     의도에 따른 하이브리드 검색 실행 (BM25 + 벡터 + RRF)
     
     Args:
-        query_text: 검색 쿼리
+        queries: 검색 쿼리 리스트 (NLU의 suggested_queries)
         entities: 추출된 엔티티
         intent: 검색 의도 (search, compare, information)
         size: 최종 반환할 결과 수
@@ -554,12 +528,16 @@ def hybrid_search(query_text: str, entities: dict[str, Any], intent: str = "sear
         RRF로 재순위화된 검색 결과
     """
     
-    # 비교 검색의 경우 특별한 처리
-    if intent == "compare" and entities.get("title"):
-        return execute_compare_hybrid_search(query_text, entities, size)
+    if not queries:
+        print("검색 쿼리가 없습니다.")
+        return []
     
-    # 일반 검색 및 정보 요청
-    # 검색 결과 수를 size보다 크게 설정하여 다양성 확보
+    # 여러 쿼리가 있는 경우 (주로 compare)
+    if len(queries) > 1:
+        return execute_multiple_query_search(queries, entities, intent, size)
+    
+    # 단일 쿼리인 경우 (search, information)
+    query_text = queries[0]
     search_size = max(50, size * 10)
     
     print(f"{intent} BM25 검색 실행 중... (상위 {search_size}개)")
@@ -634,7 +612,7 @@ def test_hybrid_search():
         print(f"   적용 로직: location 필터링 + BM25 엔티티 부스팅")
         print("-" * 60)
         
-        results = hybrid_search(test_case["query"], test_case["entities"], size=5)
+        results = hybrid_search([test_case["query"]], test_case["entities"], size=5)
         
         for j, doc in enumerate(results, 1):
             print(f"{j}. {doc.get('title', 'N/A')} (RRF: {doc['rrf_score']:.4f}, 방법: {doc['search_method']})")

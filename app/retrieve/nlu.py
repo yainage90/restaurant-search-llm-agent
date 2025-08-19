@@ -23,7 +23,7 @@ SYSTEM_PROMPT = """
 """
 
 USER_QUERY_PROMPT = """
-다음 자연어 쿼리를 분석하여 의도를 분류하고 엔티티를 추출해주세요:
+다음 자연어 쿼리를 분석하여 의도를 분류하고 엔티티를 추출한 후 검색에 최적화된 쿼리를 재정의해주세요:
 
 의도 분류:
 - search: 일반적인 검색 (예: "강남역 일식집 추천", "주차되는 식당")
@@ -39,15 +39,20 @@ USER_QUERY_PROMPT = """
 - atmosphere: 분위기(예: 이국적인, 색다른, 로맨틱한)
 - occasion: 상황(예: 회식, 단체, 데이트, 혼밥, 가족)
 
+쿼리 재정의 규칙:
+- search: 1개의 포괄적 검색 쿼리
+- compare: 각 비교 대상별 개별 쿼리 생성
+- information: 1개의 정보 요청에 최적화된 쿼리
+
 예시:
 1. "강남역 주차되는 일식집" 
-   -> intent: "search", entities: {{"location": ["강남역"], "category": ["일식"], "convenience": ["주차"]}}
+   -> intent: "search", entities: {{"location": ["강남역"], "category": ["일식"], "convenience": ["주차"]}}, suggested_queries: ["강남역 일식 주차"]
 
 2. "버거킹과 맥도날드 중 어디가 더 맛있어?"
-   -> intent: "compare", entities: {{"title": ["버거킹", "맥도날드"]}}
+   -> intent: "compare", entities: {{"title": ["버거킹", "맥도날드"]}}, suggested_queries: ["버거킹", "맥도날드"]
 
 3. "마포 진대감 주차되나요?"
-   -> intent: "information", entities: {{"location": ["마포"], "title": ["진대감"], "convenience": ["주차"]}}
+   -> intent: "information", entities: {{"location": ["마포"], "title": ["진대감"], "convenience": ["주차"]}}, suggested_queries: ["마포 진대감 주차"]
 
 자연어 쿼리: {query}
 """
@@ -56,6 +61,7 @@ USER_QUERY_PROMPT = """
 class IntentResult(BaseModel):
     intent: Literal["search", "compare", "information"]
     entities: Any
+    suggested_queries: list[str]
 
 
 def classify_intent_and_extract_entities(query: str) -> dict:
