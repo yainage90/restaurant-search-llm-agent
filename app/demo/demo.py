@@ -83,12 +83,14 @@ def should_perform_new_search(
 1. 완전히 다른 지역이나 음식 종류를 요청하는 경우
 2. 기존 검색 결과에 만족하지 못하고 다른 옵션을 원하는 경우
 3. 이전 검색과 전혀 관련 없는 새로운 맛집 정보를 요청하는 경우
+4. 검색 기록이 없는 상태에서 특정 식당명이나 구체적인 맛집 정보를 요청하는 경우
 
 다음과 같은 경우는 기존 검색 결과로 답변 가능합니다:
-1. 기존 검색 결과에 포함된 특정 식당에 대한 추가 질문 (메뉴, 영업시간, 가격, 위치, 예약 방법 등)
-2. 기존 추천 맛집 중 선택이나 비교를 요청하는 경우  
+1. 기존 검색 기록이 있고 그 검색 결과에 포함된 특정 식당에 대한 추가 질문 (메뉴, 영업시간, 가격, 위치, 예약 방법 등)
+2. 기존 검색 기록이 있고 그 추천 맛집 중 선택이나 비교를 요청하는 경우  
 3. 일반적인 대화나 감사 인사
-4. 기존 검색 결과 내에서 답변할 수 있는 질문
+4. 기존 검색 기록이 있고 그 검색 결과 내에서 답변할 수 있는 질문
+
 
 응답 형식:
 {{
@@ -267,7 +269,7 @@ def test_search_module(query: str) -> tuple[str, str, str]:
         build_vector_query
     )
     from app.retrieve.embeddings import get_query_embedding
-    from app.retrieve.search import search_restaurants_by_intent
+    from app.retrieve.search import search_restaurants_by_intent, filter_by_relevance
     
     # 1. NLU 분석 (새로운 suggested_queries 포함)
     nlu_result = classify_intent_and_extract_entities(query)
@@ -290,7 +292,7 @@ def test_search_module(query: str) -> tuple[str, str, str]:
     search_size = max(50, size * 10)
     
     # BM25 쿼리 생성
-    bm25_query = build_bm25_query(display_query, entities, intent, search_size)
+    bm25_query = build_bm25_query(display_query, entities, search_size)
     
     # 벡터 쿼리 생성
     query_embedding = get_query_embedding([display_query])
@@ -303,8 +305,11 @@ def test_search_module(query: str) -> tuple[str, str, str]:
     if "knn" in display_vector_query:
         display_vector_query["knn"]["query_vector"] = embedding_summary
     
-    # 4. 연관도 필터링을 포함한 최종 검색 실행
-    final_results = search_restaurants_by_intent(intent, entities, suggested_queries)
+    # 4. 연관도 필터링 이전 검색 결과 (하이브리드 검색만)
+    pre_filter_results = hybrid_search(suggested_queries, entities, intent, size)
+    
+    # 5. 연관도 필터링 후 최종 검색 결과
+    final_results = filter_by_relevance(query, pre_filter_results) if pre_filter_results else []
     
     # 출력 포맷팅
     nlu_str = safe_format_json(nlu_result)
@@ -319,33 +324,65 @@ def test_search_module(query: str) -> tuple[str, str, str]:
     }
     es_query_str = safe_format_json(es_queries)
     
-    # 최종 검색 결과
+    # 검색 결과 출력 (필터링 전/후 모두 표시)
     search_results_text = ""
-    for i, result in enumerate(final_results, 1):
-        title = result.get("title", "제목 없음")
-        summary = result.get("summary", "N/A")
-        
-        # 하이브리드 검색 점수 정보 표시
-        rrf_score = result.get("rrf_score", "N/A")
-        search_method = result.get("search_method", "N/A")
-        bm25_rank = result.get("bm25_rank", "N/A")
-        vector_rank = result.get("vector_rank", "N/A")
-        
-        search_results_text += f"{i}. {title}\n"
-        search_results_text += f"   RRF점수: {rrf_score}, 방법: {search_method}\n"
-        if bm25_rank != "N/A":
-            search_results_text += f"   BM25 순위: {bm25_rank}\n"
-        if vector_rank != "N/A":
-            search_results_text += f"   벡터 순위: {vector_rank}\n"
-        search_results_text += f"   요약: {summary}\n\n"
     
-    if not search_results_text:
-        search_results_text = "검색 결과가 없습니다."
+    # 필터링 이전 결과
+    search_results_text += "=== 연관도 필터링 이전 결과 ===\n\n"
+    if pre_filter_results:
+        for i, result in enumerate(pre_filter_results[:3], 1):  # 상위 3개만
+            title = result.get("title", "제목 없음")
+            summary = result.get("summary", "N/A")
+            category = result.get("category", "카테고리 없음")
+            convenience = result.get("convenience", [])
+            
+            # 하이브리드 검색 점수 정보 표시
+            rrf_score = result.get("rrf_score", "N/A")
+            search_method = result.get("search_method", "N/A")
+            bm25_rank = result.get("bm25_rank", "N/A")
+            vector_rank = result.get("vector_rank", "N/A")
+            
+            search_results_text += f"{i}. {title}\n"
+            search_results_text += f"   RRF점수: {rrf_score}, 방법: {search_method}\n"
+            if bm25_rank != "N/A":
+                search_results_text += f"   BM25 순위: {bm25_rank}\n"
+            if vector_rank != "N/A":
+                search_results_text += f"   벡터 순위: {vector_rank}\n"
+            search_results_text += f"   요약:\n{summary}...\n\n"
+    else:
+        search_results_text += "검색 결과가 없습니다.\n\n"
+    
+    # 필터링 이후 결과
+    search_results_text += "=== 연관도 필터링 후 최종 결과 ===\n\n"
+    if final_results:
+        for i, result in enumerate(final_results[:3], 1):  # 상위 3개만
+            title = result.get("title", "제목 없음")
+            summary = result.get("summary", "N/A")
+            category = result.get("category", "카테고리 없음")
+            convenience = result.get("convenience", [])
+            
+            # 하이브리드 검색 점수 정보 표시
+            rrf_score = result.get("rrf_score", "N/A")
+            search_method = result.get("search_method", "N/A")
+            bm25_rank = result.get("bm25_rank", "N/A")
+            vector_rank = result.get("vector_rank", "N/A")
+            
+            search_results_text += f"{i}. {title}\n"
+            search_results_text += f"   카테고리: {category}\n"
+            search_results_text += f"   편의사항: {convenience}\n"
+            search_results_text += f"   RRF점수: {rrf_score}, 방법: {search_method}\n"
+            if bm25_rank != "N/A":
+                search_results_text += f"   BM25 순위: {bm25_rank}\n"
+            if vector_rank != "N/A":
+                search_results_text += f"   벡터 순위: {vector_rank}\n"
+            search_results_text += f"   요약: {summary[:200]}...\n\n"
+    else:
+        search_results_text += "연관도 필터링으로 인해 모든 결과가 제거되었습니다.\n\n"
     
     return (
         f"NLU 분석 결과:\n{nlu_str}\n\n",
         f"Elasticsearch 쿼리:\n{es_query_str}",
-        f"최종 검색 결과:\n\n{search_results_text}"
+        f"검색 결과 비교:\n\n{search_results_text}"
     )
 
 
