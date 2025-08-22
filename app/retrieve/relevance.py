@@ -26,15 +26,7 @@ def create_relevance_prompt(query: str, documents: list[dict[str, Any]]) -> str:
     documents_text = ""
     for i, doc in enumerate(documents, 1):
         doc_info = f"""문서 {i}:
-식당명: {doc.get('title', 'N/A')}
-주소: {doc.get('address', 'N/A')}
-도로명 주소: {doc.get('roadAddress', 'N/A')}
-메뉴: {[menu.get('name', '') for menu in doc.get('menus', [])] + doc.get('review_food', [])}
-편의: {doc.get('convenience', [])}
-분위기: {doc.get('atmosphere', [])}
-상황: {doc.get('occasion', [])}
-기타 특징: {doc.get('features', [])}
-요약: {doc.get('summary', 'N/A')}...\n
+{doc.get('summary', 'N/A')}...\n
 """
         documents_text += doc_info
     
@@ -94,64 +86,27 @@ def grade_relevance(query: str, documents: list[dict[str, Any]]) -> dict[str, An
             "document_scores": []
         }
     
-    try:
-        # 프롬프트 생성
-        prompt = create_relevance_prompt(query, documents)
-        
-        # LLM에 연관도 평가 요청
-        response = llm.models.generate_content(
-            model="gemini-2.5-flash-lite",
-            contents=prompt,
-            config=genai.types.GenerateContentConfig(
-                temperature=0.0,
-                system_instruction=SYSTEM_PROMPT,
-                response_mime_type="application/json",
-                response_schema=RelevanceResult,
-                max_output_tokens=1024,
-            )
-        )
-        
-        # JSON 응답 파싱
-        response_text = response.text
-        
-        # JSON 추출 (마크다운 코드블록 제거)
-        if "```json" in response_text:
-            json_start = response_text.find("```json") + 7
-            json_end = response_text.find("```", json_start)
-            response_text = response_text[json_start:json_end].strip()
-        elif "```" in response_text:
-            json_start = response_text.find("```") + 3
-            json_end = response_text.find("```", json_start)
-            response_text = response_text[json_start:json_end].strip()
-        
-        result = json.loads(response_text)
-        
-        # 결과 검증
-        if "overall_relevance" not in result:
-            raise ValueError("응답에 overall_relevance 필드가 없습니다.")
-        
-        if result["overall_relevance"] not in ["relevant", "irrelevant"]:
-            raise ValueError("overall_relevance 값이 유효하지 않습니다.")
-        
-        return result
-        
-    except json.JSONDecodeError as e:
-        print(f"JSON 파싱 오류: {e}")
-        print(f"원본 응답: {response_text}")
-        return {
-            "overall_relevance": "irrelevant",
-            "reason": "응답 파싱 오류가 발생했습니다.",
-            "document_scores": []
-        }
+    # 프롬프트 생성
+    prompt = create_relevance_prompt(query, documents)
     
-    except Exception as e:
-        print(f"연관도 평가 오류: {e}")
-        return {
-            "overall_relevance": "irrelevant",
-            "reason": f"오류가 발생했습니다: {str(e)}",
-            "document_scores": []
-        }
-
+    from app.llm.llm import getnerate_with_gemini
+    result = getnerate_with_gemini(
+        model="gemini-2.5-flash",
+        system_prompt=SYSTEM_PROMPT,
+        user_prompt=prompt,
+        max_output_tokens=1024,
+        response_shcema=RelevanceResult,
+    )
+    
+    # 결과 검증
+    if "overall_relevance" not in result:
+        raise ValueError("응답에 overall_relevance 필드가 없습니다.")
+    
+    if result["overall_relevance"] not in ["relevant", "irrelevant"]:
+        raise ValueError("overall_relevance 값이 유효하지 않습니다.")
+    
+    return result
+        
 
 def test_relevance_grading():
     """연관도 평가 기능 테스트"""

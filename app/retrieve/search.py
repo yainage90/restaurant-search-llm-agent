@@ -45,7 +45,7 @@ def filter_by_relevance(query: str, results: list[dict[str, Any]]) -> list[dict[
 
 
 # 메인 검색 함수들
-def search_restaurants_by_intent(intent: str, entities: dict[str, Any], suggested_queries: list[str], original_query: str) -> list[dict[str, Any]]:
+def search_restaurants_by_intent(intent: str, entities: dict[str, Any], negation_entities: dict[str, Any], suggested_queries: list[str], original_query: str) -> list[dict[str, Any]]:
     """의도에 따른 하이브리드 검색 실행"""
     
     # 검색 전략에 따라 결과 수 조정
@@ -60,7 +60,7 @@ def search_restaurants_by_intent(intent: str, entities: dict[str, Any], suggeste
         return []
     
     # 하이브리드 검색 실행 (suggested_queries 사용)
-    results = hybrid_search(suggested_queries, entities, intent, size)
+    results = hybrid_search(suggested_queries, entities, negation_entities, intent, size)
     
     print(f"{intent} 하이브리드 검색 완료: {len(results)}개 문서 발견")
     
@@ -71,30 +71,34 @@ def search_restaurants_by_intent(intent: str, entities: dict[str, Any], suggeste
     return results
 
 
-def search_restaurants(query: str) -> list[dict[str, Any]]:
+def search_restaurants(query: str, context: str = None) -> list[dict[str, Any]]:
     """
     자연어 쿼리를 받아서 식당 검색을 수행하는 메인 함수
     
     Args:
         query: 사용자의 자연어 쿼리
+        context: 이전 대화 맥락 (선택사항)
 
     Returns:
         검색된 식당 문서 리스트
     """
     
     # 1. 의도 분류, 엔티티 추출, 쿼리 재정의
-    intent_result = classify_intent_and_extract_entities(query)
+    intent_result = classify_intent_and_extract_entities(query, context)
     intent = intent_result["intent"]
     entities = intent_result["entities"]
+    negation_entities = intent_result.get("negation_entities", {})
     suggested_queries = intent_result.get("suggested_queries", [query])
     
     print(f"쿼리: {query}")
     print(f"검색 의도: {intent}")
     print(f"추출된 엔티티: {entities}")
+    if negation_entities:
+        print(f"제외할 엔티티: {negation_entities}")
     print(f"재정의된 쿼리: {suggested_queries}")
     
     # 2. 의도에 따른 검색 전략 실행
-    results = search_restaurants_by_intent(intent, entities, suggested_queries, query)
+    results = search_restaurants_by_intent(intent, entities, negation_entities, suggested_queries, query)
     
     return results
 
@@ -118,14 +122,14 @@ def search_web(query: str) -> list[dict[str, str]]:
     return docs 
 
 
-def search(query: str) -> str:
+def search(query: str, context: str = None) -> str:
     """통합 검색 (식당 검색 -> 웹 검색)"""
-    context = ""
-    docs = search_restaurants(query)
+    result_context = ""
+    docs = search_restaurants(query, context)
     
     if docs:
         for i, doc in enumerate(docs):
-            context += f"""
+            result_context += f"""
 문서 {i + 1}:
 {doc["summary"]}
 
@@ -134,13 +138,13 @@ def search(query: str) -> str:
         print("식당을 찾지 못해 웹 검색을 시작합니다.")
         docs = search_web(query)
         for i, doc in enumerate(docs):
-            context += f"""
+            result_context += f"""
 문서 {i + 1}:
 문서 제목: {doc["title"]}
 문서 내용: {doc["content"]}
 
 """
-    return context
+    return result_context
 
 def test_search():
     """하이브리드 검색 통합 테스트"""
@@ -150,6 +154,7 @@ def test_search():
         "강남 진대감 vs 굽다",  # compare intent
         "판교 가족외식 고기집 추천",  # search intent
         "데이트하기 좋은 로맨틱한 분위기 식당",  # search intent
+        "강남역 회식하기 좋은 한식당인데, 술집은 빼고", # negation intent
     ]
 
     print("=== 하이브리드 검색 통합 테스트 ===")
@@ -159,6 +164,7 @@ def test_search():
         context = search(query)
         # print(context)
         print("=" * 80)
+
 
 
 if __name__ == "__main__":

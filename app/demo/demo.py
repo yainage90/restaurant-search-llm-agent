@@ -12,7 +12,6 @@ from app.retrieve.relevance import grade_relevance
 from app.demo.config import config, ui_messages
 from app.demo.session import SessionManager
 from app.demo.utils import (
-    handle_exceptions, 
     parse_json_response, 
     safe_format_json, 
     calculate_keyword_similarity,
@@ -31,12 +30,6 @@ load_dotenv()
 session_manager = SessionManager()
 
 
-@handle_exceptions(
-    default_return={
-        "need_search": False, 
-        "reason": ui_messages.search_decision_error
-    }
-)
 def should_perform_new_search(
     current_message: str, 
     search_history: list[dict], 
@@ -203,12 +196,7 @@ def _handle_follow_up_chat(message: str, history: list[list[str]], session) -> s
     print(f'[Session {session.session_id}] 검색 필요성 판단: {search_decision}')
     
     if search_decision["need_search"]:
-        # 중복 검색 방지
-        if is_similar_query(message, session.search_history):
-            print(f'[Session {session.session_id}] 유사한 검색으로 판단, 기존 컨텍스트 사용')
-        else:
-            # 새로운 검색 수행
-            return _perform_new_search(message, session)
+        return _perform_new_search(message, session)
     
     # 기존 컨텍스트로 응답 생성
     return _generate_context_response(message, history, session)
@@ -218,7 +206,13 @@ def _perform_new_search(query: str, session) -> str:
     """새로운 검색 수행"""
     try:
         print(f'[Session {session.session_id}] 새로운 검색 수행 - Query: {query}')
-        restaurant_context = search(query)
+        # 이전 검색 기록에서 가장 최근 쿼리를 맥락으로 사용
+        context = None
+        if session.search_history:
+            context = session.search_history[-1]['query']
+            print(f'[Session {session.session_id}] 이전 쿼리를 맥락으로 사용: {context}')
+        
+        restaurant_context = search(query, context)
         session.update_context(query, restaurant_context)
         
         bot_response = generate(query, restaurant_context)
@@ -251,16 +245,14 @@ def _generate_context_response(message: str, history: list[list[str]], session) 
         return f"{ui_messages.error_prefix}{str(e)}"
 
 
-@handle_exceptions(default_return="")
-def test_nlu_module(query: str) -> str:
+def test_nlu_module(query: str, context: str = None) -> str:
     """NLU 모듈 테스트 - 의도 분류 및 엔티티 추출"""
-    from ..retrieve.nlu import classify_intent_and_extract_entities
-    result = classify_intent_and_extract_entities(query)
+    from app.retrieve.nlu import classify_intent_and_extract_entities
+    result = classify_intent_and_extract_entities(query, context)
     return safe_format_json(result)
 
 
-@handle_exceptions(default_return=("", "", ""))
-def test_search_module(query: str) -> tuple[str, str, str]:
+def test_search_module(query: str, context: str = None) -> tuple[str, str, str]:
     """검색 모듈 전체 파이프라인 테스트"""
     from app.retrieve.nlu import classify_intent_and_extract_entities
     from app.retrieve.hybrid_search import (
@@ -272,9 +264,10 @@ def test_search_module(query: str) -> tuple[str, str, str]:
     from app.retrieve.search import search_restaurants_by_intent, filter_by_relevance
     
     # 1. NLU 분석 (새로운 suggested_queries 포함)
-    nlu_result = classify_intent_and_extract_entities(query)
+    nlu_result = classify_intent_and_extract_entities(query, context)
     intent = nlu_result.get("intent", "search")
     entities = nlu_result.get("entities", {})
+    negation_entities = nlu_result.get("negation_entities", {})
     suggested_queries = nlu_result.get("suggested_queries", [query])
     
     # 2. 검색 크기 결정
@@ -292,11 +285,11 @@ def test_search_module(query: str) -> tuple[str, str, str]:
     search_size = max(50, size * 10)
     
     # BM25 쿼리 생성
-    bm25_query = build_bm25_query(display_query, entities, search_size)
+    bm25_query = build_bm25_query(intent, display_query, entities, negation_entities, search_size)
     
     # 벡터 쿼리 생성
     query_embedding = get_query_embedding([display_query])
-    vector_query = build_vector_query(query_embedding, entities, search_size)
+    vector_query = build_vector_query(query_embedding, entities, negation_entities, search_size)
     
     # 벡터 요약으로 대체 (출력용)
     import copy
@@ -306,7 +299,7 @@ def test_search_module(query: str) -> tuple[str, str, str]:
         display_vector_query["knn"]["query_vector"] = embedding_summary
     
     # 4. 연관도 필터링 이전 검색 결과 (하이브리드 검색만)
-    pre_filter_results = hybrid_search(suggested_queries, entities, intent, size)
+    pre_filter_results = hybrid_search(suggested_queries, entities, negation_entities, intent, size)
     
     # 5. 연관도 필터링 후 최종 검색 결과
     final_results = filter_by_relevance(query, pre_filter_results) if pre_filter_results else []
@@ -386,7 +379,6 @@ def test_search_module(query: str) -> tuple[str, str, str]:
     )
 
 
-@handle_exceptions(default_return="")
 def get_relevance_evaluation(query: str) -> str:
     """연관성 평가 결과만 반환"""
     # 실제 Elasticsearch 검색 수행
@@ -441,7 +433,6 @@ def get_relevance_evaluation(query: str) -> str:
     return result_text
 
 
-@handle_exceptions(default_return="")
 def get_search_results_summary(query: str) -> str:
     """검색 결과 요약만 반환"""
     # 실제 Elasticsearch 검색 수행
@@ -465,7 +456,6 @@ def get_search_results_summary(query: str) -> str:
     return result_text
 
 
-@handle_exceptions(default_return="")
 def test_full_pipeline(query: str) -> str:
     """전체 파이프라인 테스트 (실제 검색 + 연관성 평가)"""
     # 실제 검색 수행
