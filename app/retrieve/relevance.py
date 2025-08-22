@@ -7,6 +7,7 @@ from typing import Any
 from google import genai
 from dotenv import load_dotenv
 from pydantic import BaseModel
+from app.llm.llm import generate_with_gemini
 
 load_dotenv()
 
@@ -89,8 +90,7 @@ def grade_relevance(query: str, documents: list[dict[str, Any]]) -> dict[str, An
     # 프롬프트 생성
     prompt = create_relevance_prompt(query, documents)
     
-    from app.llm.llm import getnerate_with_gemini
-    result = getnerate_with_gemini(
+    result = generate_with_gemini(
         model="gemini-2.5-flash",
         system_prompt=SYSTEM_PROMPT,
         user_prompt=prompt,

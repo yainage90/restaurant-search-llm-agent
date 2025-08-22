@@ -11,7 +11,7 @@ _gemini_client = genai.Client()
 _openai_client = OpenAI()
 
 
-def getnerate_with_gemini(
+def generate_with_gemini(
     model: str,
     system_prompt: str,
     user_prompt: str,
