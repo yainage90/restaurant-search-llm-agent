@@ -100,6 +100,7 @@ def build_location_filters(locations: list[str]) -> list[dict]:
 
 
 def build_bm25_query(
+    intent: str,
     query_text: str,
     entities: dict[str, Any],
     size: int = 50
@@ -107,6 +108,7 @@ def build_bm25_query(
     """의도에 따른 BM25 키워드 검색 쿼리 생성"""
     
     should_clauses = []
+    must_clauses = []
 
     search_fields = [
         "title^2.0", "category^1.5", "review_food^1.5", "convenience^1.2",
@@ -129,7 +131,10 @@ def build_bm25_query(
         should_clauses.append({"match": {"category": {"query": ",".join(categories), "boost": 2.0}}})
 
     if conveniences := entities.get("convenience"):
-        should_clauses.append({"match": {"convenience": {"query": ",".join(conveniences), "boost": 1.2}}})
+        if intent == "search":
+            must_clauses.append({"match": {"convenience": {"query": ",".join(conveniences), "boost": 1.2}}})
+        else:
+            should_clauses.append({"match": {"convenience": {"query": ",".join(conveniences), "boost": 1.2}}})
 
     if atmospheres := entities.get("atmosphere"):
         should_clauses.append({"match": {"atmosphere": {"query": ",".join(atmospheres), "boost": 1.0}}})
@@ -146,15 +151,19 @@ def build_bm25_query(
         })
         should_clauses.append({"match": {"review_food": {"query": ",".join(menus), "boost": 1.2}}})
 
+    if locations := entities.get("location"):
+        location_filters = build_location_filters(locations)
+        if location_filters:
+            must_clauses.extend(location_filters)
+
     final_bool_query = {}
+
     if should_clauses:
         final_bool_query["should"] = should_clauses
         final_bool_query["minimum_should_match"] = 1
 
-    if locations := entities.get("location"):
-        location_filters = build_location_filters(locations)
-        if location_filters:
-            final_bool_query["must"] = location_filters
+    if must_clauses:
+        final_bool_query["must"] = must_clauses
 
     query = {"bool": final_bool_query}
 
@@ -201,7 +210,7 @@ def build_vector_query(
 
 def execute_bm25_search(query_text: str, entities: dict[str, Any], intent: str = "search", size: int = 50) -> list[dict[str, Any]]:
     """BM25 검색 실행"""
-    bm25_query = build_bm25_query(query_text, entities, size)
+    bm25_query = build_bm25_query(intent, query_text, entities, size)
     
     try:
         client = get_elasticsearch_client()
