@@ -21,12 +21,12 @@ def generate_with_gemini(
     config = genai.types.GenerateContentConfig(
         temperature=0.0,
         system_instruction=system_prompt,
-        response_mime_type="application/json",
         max_output_tokens=max_output_tokens,
         thinking_config=genai.types.ThinkingConfig(thinking_budget=0),
     )
     if response_shcema:
         config.response_schema = response_shcema
+        config.response_mime_type = "application/json"
 
     response = _gemini_client.models.generate_content(
         model=model,
@@ -54,17 +54,28 @@ def generate_with_openai(
     max_output_tokens: int = 1024,
     text_format = None,
 ):
-    response = _openai_client.responses.parse(
-        model=model,
-        input=[
-            { "role": "system", "content": system_prompt },
-            { "role": "user", "content": user_prompt },
-        ],
-        max_output_tokens=max_output_tokens,
-        text_format=text_format,
-    )
-
     if text_format:
-        return response.output_parsed.model_dump()
-    
-    return response.output
+        response = _openai_client.responses.parse(
+            model=model,
+            input=[
+                { "role": "system", "content": system_prompt },
+                { "role": "user", "content": user_prompt },
+            ],
+            max_output_tokens=max_output_tokens,
+            text_format=text_format,
+        )
+        result = response.output_parsed.model_dump()
+    else:
+        response = _openai_client.responses.parse(
+            model=model,
+            input=[
+                { "role": "system", "content": system_prompt },
+                { "role": "user", "content": user_prompt },
+            ],
+            max_output_tokens=max_output_tokens,
+        )
+        result = response.output_text
+        
+
+    return result
+

@@ -1,9 +1,7 @@
 from dotenv import load_dotenv
-from google import genai
+from app.llm.llm import generate_with_gemini, generate_with_openai
 
 load_dotenv()
-
-client = genai.Client()
 
 
 SYSTEM_PROMPT = """당신은 한국의 식당 정보를 제공하는 전문 AI 어시스턴트입니다.
@@ -41,60 +39,18 @@ def generate(query: str, context: str) -> str:
     # 프롬프트 생성
     if query:
         user_prompt = GENERATION_PROMPT.format(query=query, context=context)
-        
-        # LLM에 요청
-        response = client.models.generate_content(
-            model="gemini-2.5-flash-lite",
-            contents=user_prompt,
-            config=genai.types.GenerateContentConfig(
-                temperature=0.0,
-                system_instruction=SYSTEM_PROMPT,
-                max_output_tokens=1024,
-            )
-        )
     else:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash-lite",
-            contents=context,
-            config=genai.types.GenerateContentConfig(
-                temperature=0.0,
-                system_instruction=SYSTEM_PROMPT,
-                max_output_tokens=1024,
-            )
-                
-        )
+        user_prompt = context
 
-    generated_text = response.text
-
+    generated_text = generate_with_gemini(
+        model="gemini-2.5-flash",
+        system_prompt=SYSTEM_PROMPT,
+        user_prompt=user_prompt,
+        max_output_tokens=2048,
+    )
 
     return generated_text
 
-
-def generate_streaming(chat_history: str):
-    """
-    사용자 쿼리와 검색된 컨텍스트를 받아서 LLM에 스트리밍 응답 생성을 요청합니다.
-    
-    Args:
-        context: 검색된 식당 정보 문서들 (빈 문자열이면 일반 대화)
-        
-    Yields:
-        str: 스트리밍되는 응답 청크
-    """
-    
-    # LLM에 스트리밍 요청
-    response = client.models.generate_content_stream(
-        model="gemini-2.5-flash-lite",
-        contents=chat_history,
-        config=genai.types.GenerateContentConfig(
-            temperature=0.0,
-            max_output_tokens=1024,
-        ),
-    )
-
-    for chunk in response:
-        if chunk.text:
-            yield chunk.text
-        
 
 def test_generation():
     query = "강남역 근처에서 주차 가능한 일식집 추천해주세요"

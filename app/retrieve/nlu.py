@@ -2,14 +2,13 @@
 검색 의도 분류 및 엔티티 추출 모듈
 """
 
-from google import genai
 from dotenv import load_dotenv
 from pydantic import BaseModel
 from typing import Literal, Any
+from app.llm.llm import generate_with_gemini
 
 load_dotenv()
 
-client = genai.Client()
 
 SYSTEM_PROMPT = """
 당신은 식당 검색을 위한 의도 분류 및 엔티티 추출 전문가입니다.
@@ -85,19 +84,13 @@ def classify_intent_and_extract_entities(query: str, context: str = None) -> dic
     else:
         user_prompt = USER_QUERY_PROMPT.format(query=query)
     
-    response = client.models.generate_content(
+    result = generate_with_gemini(
         model="gemini-2.5-flash-lite",
-        contents=user_prompt,
-        config=genai.types.GenerateContentConfig(
-            temperature=0.0,
-            system_instruction=SYSTEM_PROMPT,
-            response_mime_type="application/json",
-            response_schema=IntentResult,
-            max_output_tokens=512,
-        )
+        system_prompt=SYSTEM_PROMPT,
+        user_prompt=user_prompt,
+        max_output_tokens=512,
+        response_shcema=IntentResult,
     )
-    
-    result = response.parsed.model_dump(exclude_none=True)
     
     # 빈 값들 제거
     result["entities"] = {k: v for k, v in result.get("entities", {}).items() if v}
