@@ -53,6 +53,7 @@ def generate_with_openai(
     user_prompt: str,
     max_output_tokens: int = 1024,
     text_format = None,
+    service_tier: str = "default",
 ):
     if text_format:
         response = _openai_client.responses.parse(
@@ -63,6 +64,7 @@ def generate_with_openai(
             ],
             max_output_tokens=max_output_tokens,
             text_format=text_format,
+            service_tier=service_tier,
         )
         result = response.output_parsed.model_dump()
     else:
@@ -73,6 +75,7 @@ def generate_with_openai(
                 { "role": "user", "content": user_prompt },
             ],
             max_output_tokens=max_output_tokens,
+            service_tier=service_tier,
         )
         result = response.output_text
         
