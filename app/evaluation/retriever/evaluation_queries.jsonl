@@ -1,0 +1,14 @@
+{"query": "강남역 주차되는 일식집", "intent": "search", "entities": {"location": ["강남역"], "category": ["일식"], "convenience": ["주차"]}, "negation_entities": {}, "suggested_queries": ["강남역 일식 주차"]}
+{"query": "스타벅스 메뉴 알려줘", "intent": "information", "entities": {"title": ["스타벅스"]}, "negation_entities": {}, "suggested_queries": ["스타벅스 메뉴"]}
+{"query": "조용하고 데이트하기 좋은곳", "intent": "search", "entities": {"atmosphere": ["조용하고"], "occasion": ["데이트"]}, "negation_entities": {}, "suggested_queries": ["조용한 데이트 장소"]}
+{"query": "판교 콜키지 되는 술집", "intent": "search", "entities": {"location": ["판교"], "category": ["술집"], "convenience": ["콜키지"]}, "negation_entities": {}, "suggested_queries": ["판교 콜키지 술집"]}
+{"query": "정자역 고기집", "intent": "search", "entities": {"location": ["정자역"], "category": ["고기집"]}, "negation_entities": {}, "suggested_queries": ["정자역 고기집"]}
+{"query": "판교 애견동반 식당 추천", "intent": "search", "entities": {"location": ["판교"], "convenience": ["애견동반"]}, "negation_entities": {}, "suggested_queries": ["판교 애견동반 식당"]}
+{"query": "맥도날드 드라이브스루", "intent": "information", "entities": {"title": ["맥도날드"], "convenience": ["드라이브스루"]}, "negation_entities": {}, "suggested_queries": ["맥도날드 드라이브스루"]}
+{"query": "강남 술집빼고 회식하기 좋은 식당", "intent": "search", "entities": {"location": ["강남"], "occasion": ["회식"]}, "negation_entities": {"category": ["술집"]}, "suggested_queries": ["강남 회식 식당"]}
+{"query": "24시간 감자탕집, 뼈해장국", "intent": "search", "entities": {"menu": ["감자탕", "뼈해장국"], "convenience": ["24시"]}, "negation_entities": {}, "suggested_queries": ["24시 감자탕 뼈해장국"]}
+{"query": "햄버거. 맥도날드 빼고", "intent": "search", "entities": {"menu": ["햄버거"]}, "negation_entities": {"title": ["맥도날드"]}, "suggested_queries": ["햄버거"]}
+{"query": "마포 진대감 주차되나요?", "intent": "information", "entities": {"location": ["마포"], "title": ["진대감"], "convenience": ["주차"]}, "negation_entities": {}, "suggested_queries": ["마포 진대감 주차"]}
+{"query": "맥도날드 24시간 하나요?", "intent": "information", "entities": {"title": ["맥도날드"], "convenience": ["24시"]}, "negation_entities": {}, "suggested_queries": ["맥도날드 24시"]}
+{"query": "강남 진대감 vs 삼육가 어디가 더 맛있어?", "intent": "compare", "entities": {"location": ["강남"], "title": ["진대감", "삼육가"]}, "negation_entities": {}, "suggested_queries": ["강남 진대감", "강남 삼육가"]}
+{"query": "맥도날드 vs 롯데리아 vs 버거킹", "intent": "compare", "entities": {"title": ["맥도날드", "롯데리아", "버거킹"]}, "negation_entities": {}, "suggested_queries": ["맥도날드", "롯데리아", "버거킹"]}
