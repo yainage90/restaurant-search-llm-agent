@@ -471,17 +471,12 @@ def test_hybrid_search():
             size=5
         )
         
-        for j, doc in enumerate(results, 1):
-            print(f"{j}. {doc.get('title', 'N/A')} (RRF: {doc['rrf_score']:.4f}, 방법: {doc['search_method']})")
-            print(f"   카테고리: {doc.get('category', 'N/A')}")
+        for doc in results:
             if doc.get('bm25_rank'):
                 print(f"   BM25 순위: {doc['bm25_rank']} (점수: {doc.get('bm25_score', 'N/A'):.2f})")
             if doc.get('vector_rank'):
                 print(f"   벡터 순위: {doc['vector_rank']} (점수: {doc.get('vector_score', 'N/A'):.2f})")
-            print(f"   주소: {doc.get('address', 'N/A')}")
-            print(f"   편의: {doc.get('convenience', [])}")
-            print(f"   분위기: {doc.get('atmosphere', [])}")
-            print(f"   상황: {doc.get('occasion', [])}")
+            print(f"{doc.get('summary', 'N/A')}\n")
         
         print()
 
