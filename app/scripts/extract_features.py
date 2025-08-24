@@ -26,7 +26,7 @@ SYSTEM_PROMPT = """
 EXTRACT_FEATURES_PROMPT = """
 식당 소개글과 사용자 리뷰에서 아래 각 항목에 해당하는 특징 키워드가 있으면 추출해주세요.
 1. `review_food`: 리뷰에서 언급된 메뉴나 음식 키워드  (예: 파스타, 스테이크, 떡볶이)
-2. `convenience`: 식당에서 제공하는 긍정적인 편의 및 서비스 (예: 주차, 발렛, 배달, 포장, 예약, 룸, 콜키지, 반려동물, 와이파이, 24시, 구워줌)
+2. `convenience`: 식당에서 제공하는 긍정적인 편의 및 서비스 (예: 주차, 발렛, 배달, 포장, 예약, 룸, 콜키지, 반려동물, 와이파이, 24시, 구워줌, 드라이브스루, 흡연구역, 휠체어, 유모차)
 3. `atmosphere`: 분위기 (예: 이국적인, 로맨틱한, 뷰맛집, 노포, 조용한, 시끌벅적한)
 4. `occasion`: 방문 목적 (예: 데이트, 기념일, 회식, 단체, 혼밥, 혼술)
 5. `features`: 기타 특징 (예: 넓은공간, 가성비)
@@ -197,6 +197,7 @@ def extract_features_with_openai(place_id: str, reviews: list[str], description:
             { "role": "user", "content": user_prompt },
         ],
         text_format=LLMFeatures,
+        service_tier="flex",
     )
 
     try:
